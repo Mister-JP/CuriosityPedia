@@ -1,5 +1,5 @@
 export type PerformerId = "archivist" | "field-naturalist" | "systems-cartographer";
-export type ModelId = "fixture-terra";
+export type ModelId = "gpt-5.6-terra" | "fixture-terra";
 export type ResearchPreset = "spark" | "standard" | "deep";
 
 export type Performer = {
@@ -16,6 +16,7 @@ export type ModelConfig = {
   provider: "OpenAI";
   name: string;
   disclosure: string;
+  mode: "live" | "fixture";
 };
 
 export type Viewer = {
@@ -76,6 +77,18 @@ export type JourneyTurn = {
   sources: Source[];
   researchEvents: ResearchEvent[];
   interlude: Interlude;
+  research: {
+    mode: "live" | "fixture";
+    providerResponseId: string | null;
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      reasoningTokens: number;
+      totalTokens: number;
+      webSearchCalls: number;
+      latencyMs: number;
+    };
+  };
   createdAt: number;
 };
 
@@ -116,6 +129,50 @@ export type AdvanceJourneyRequest = {
   idempotencyKey: string;
 };
 
+export type LiveResearchRequest =
+  | {
+      kind: "create";
+      seed: string;
+      performerId: PerformerId;
+      modelId: "gpt-5.6-terra";
+      researchPreset: ResearchPreset;
+      idempotencyKey: string;
+    }
+  | {
+      kind: "advance";
+      journeyId: string;
+      fromTurnId: string;
+      action: "choose" | "delegate";
+      optionId?: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+    };
+
+export type LiveResearchStreamEvent =
+  | {
+      type: "started";
+      requestId: string;
+      question: string;
+      message: string;
+    }
+  | {
+      type: "activity";
+      event: ResearchEvent;
+    }
+  | {
+      type: "interlude";
+      interlude: Omit<Interlude, "id">;
+    }
+  | {
+      type: "complete";
+      data: JourneyDetail;
+      viewer: Viewer;
+    }
+  | {
+      type: "error";
+      error: ApiFailure["error"];
+    };
+
 export type CompareResult = {
   left: JourneySummary;
   right: JourneySummary;
@@ -139,6 +196,10 @@ export type ApiFailure = {
       | "VERSION_CONFLICT"
       | "IDEMPOTENCY_CONFLICT"
       | "JOURNEY_LIMIT"
+      | "LIVE_RESEARCH_LIMIT"
+      | "PROVIDER_UNAVAILABLE"
+      | "PROVIDER_ERROR"
+      | "RESEARCH_VALIDATION_FAILED"
       | "INTERNAL_ERROR";
     message: string;
     retryable: boolean;

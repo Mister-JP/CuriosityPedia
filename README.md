@@ -2,18 +2,19 @@
 
 WonderDrive is an audience-directed curiosity performance. A visitor chooses a performer and a question, watches the research stage, receives a sourced explanation, and chooses between exactly two earned ways forward.
 
-This repository is the public implementation for the 2026 OpenAI Build Week hackathon. It is currently at **Phase 1: deterministic product loop**. A judge can create, direct, reject, delegate, save, reload, branch, map, delete, and compare journeys through the public product. The complete interaction uses reviewed fixtures, so it proves the experience and persistence contract without pretending that live model research is connected.
+This repository is the public implementation for the 2026 OpenAI Build Week hackathon. It is currently at **Phase 2: bounded live research**. A judge can use GPT-5.6 Terra with built-in web search for a real foreground research turn, inspect its sources and usage, direct the next turn, save and branch journeys, or switch to a free deterministic demo.
 
-**Live Phase 1:** [wonderdrive.jigs.chatgpt.site](https://wonderdrive.jigs.chatgpt.site)
+**Live Phase 2:** [wonderdrive.jigs.chatgpt.site](https://wonderdrive.jigs.chatgpt.site)
 
 ## Product contract
 
-- One selected performer carries each turn; the Phase 1 model ticket is an explicitly labeled fixture.
+- One selected performer and model carry each turn; the live adapter never silently delegates to another model.
 - Research activity and sources are observable; hidden chain-of-thought is not exposed.
 - Every ready turn ends with exactly two distinct next questions.
 - The journey advances only after an explicit audience action.
 - Saved journeys form a branchable graph, not a chat transcript.
 - Comparison reads previously saved journeys and never launches hidden parallel work.
+- Provider failure or disconnect commits no partial turn; the fixture mode is an explicit user choice, never a silent fallback.
 
 ## Stack
 
@@ -35,9 +36,9 @@ cp .env.example .env.local
 npm run dev
 ```
 
-The local site runs at `http://localhost:3000`. Phase 1 makes no provider request, so no API key is required.
+The local site runs at `http://localhost:3000`. Set `OPENAI_API_KEY` in `.env.local` to exercise live mode locally; the free demo and build tests require no provider key. Never expose this value through a `NEXT_PUBLIC_` variable.
 
-Apply both SQL files in `drizzle/` to a fresh local D1 database before exercising the API. Sites applies the packaged migrations when a version is deployed.
+Apply all SQL files in `drizzle/` to a fresh local D1 database before exercising the API. Sites applies the packaged migrations when a version is deployed.
 
 ## Validation
 
@@ -48,7 +49,7 @@ npm test
 npm run db:generate
 ```
 
-`npm test` performs a production Sites build, verifies the public page and health endpoint, and checks deterministic fixture invariants.
+`npm test` performs a production Sites build, verifies the public page and health endpoint, checks fixture invariants, and tests live-source normalization plus citation allowlisting without spending provider usage.
 
 ## Repository map
 
@@ -66,12 +67,13 @@ tests/                Rendered production and fixture checks
 
 - [Phase 0 acceptance gates](docs/phase-0.md)
 - [Phase 1 implementation contract](docs/phase-1.md)
+- [Phase 2 live research contract](docs/phase-2.md)
 - [Final architecture decisions](docs/architecture.md)
 - [Final product and engineering blueprint](docs/WonderDrive_Final_Product_and_Engineering_Blueprint_v3_Research_First.docx)
 
 ## Status and scope
 
-The current product is an honest deterministic rehearsal, not a simulated claim of live AI. The next implementation milestone is the first bounded OpenAI Responses research adapter, connected behind the canonical turn contract after the foreground streaming and cost gates are verified.
+Live mode is one foreground OpenAI Responses request with built-in web search. Presets cap tool calls, output tokens, reasoning effort, and wall time; guest and signed-in identities also have rolling live-run limits. Consulted URLs, cited relations, provider request ID, tokens, search calls, and latency are saved with the committed turn. The free demo remains available for zero-provider-cost judging and development.
 
 Automatic journeys, scheduled/background continuation, Trigger.dev, provider fan-out, and live parallel comparison are outside the hackathon scope.
 

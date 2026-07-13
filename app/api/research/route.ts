@@ -1,0 +1,123 @@
+import { failure, readJson } from "../../../lib/api";
+import type {
+  ApiFailure,
+  LiveResearchRequest,
+  LiveResearchStreamEvent,
+} from "../../../lib/contracts";
+import {
+  commitLiveResearch,
+  markLiveResearchFailed,
+  prepareLiveResearch,
+} from "../../../lib/live-repository";
+import { runLiveResearch } from "../../../lib/live-research";
+import { buildFixtureTurn } from "../../../lib/fixtures";
+import { RepositoryError } from "../../../lib/repository";
+import { publicViewer, resolveViewer } from "../../../lib/viewer";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request) {
+  try {
+    const viewer = await resolveViewer();
+    const body = (await readJson(request)) as LiveResearchRequest;
+    const preparation = await prepareLiveResearch(viewer, body);
+    const encoder = new TextEncoder();
+    const abortController = new AbortController();
+    let closed = false;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (event: LiveResearchStreamEvent) => {
+          if (!closed) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        };
+        void (async () => {
+          const requestId =
+            preparation.type === "ready" ? preparation.prepared.requestId : preparation.requestId;
+          const question =
+            preparation.type === "ready"
+              ? preparation.prepared.question
+              : preparation.journey.turns.at(-1)?.question ?? preparation.journey.seed;
+          send({
+            type: "started",
+            requestId,
+            question,
+            message:
+              preparation.type === "replay"
+                ? "Returning the already committed result for this request"
+                : "Foreground research started; keep this page open",
+          });
+          if (preparation.type === "replay") {
+            send({
+              type: "complete",
+              data: preparation.journey,
+              viewer: publicViewer(viewer),
+            });
+            closed = true;
+            controller.close();
+            return;
+          }
+          const interlude = buildFixtureTurn({
+            question: preparation.prepared.question,
+            depth: preparation.prepared.depth,
+            performerId: preparation.prepared.performerId,
+          }).interlude;
+          send({
+            type: "interlude",
+            interlude: {
+              text: interlude.text,
+              sourceTitle: interlude.sourceTitle,
+              sourceUrl: interlude.sourceUrl,
+            },
+          });
+          try {
+            const draft = await runLiveResearch(
+              preparation.prepared,
+              (event) => send({ type: "activity", event }),
+              abortController.signal,
+            );
+            const journey = await commitLiveResearch(viewer, preparation.prepared, draft);
+            send({ type: "complete", data: journey, viewer: publicViewer(viewer) });
+          } catch (error) {
+            await markLiveResearchFailed(viewer, preparation.prepared.requestId, error);
+            if (!closed) send({ type: "error", error: publicError(error) });
+          } finally {
+            if (!closed) {
+              closed = true;
+              controller.close();
+            }
+          }
+        })();
+      },
+      cancel() {
+        closed = true;
+        abortController.abort("Client disconnected from foreground research");
+      },
+    });
+
+    const headers = new Headers({
+      "cache-control": "no-store, no-transform",
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    });
+    if (viewer.setCookie) headers.append("set-cookie", viewer.setCookie);
+    return new Response(stream, { status: 200, headers });
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+function publicError(error: unknown): ApiFailure["error"] {
+  if (error instanceof RepositoryError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+    };
+  }
+  console.error("WonderDrive live research error", error);
+  return {
+    code: "INTERNAL_ERROR",
+    message: "WonderDrive could not complete live research. No partial journey was saved.",
+    retryable: true,
+  };
+}

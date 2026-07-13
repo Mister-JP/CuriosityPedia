@@ -23,6 +23,10 @@ type ErrorCode =
   | "VERSION_CONFLICT"
   | "IDEMPOTENCY_CONFLICT"
   | "JOURNEY_LIMIT"
+  | "LIVE_RESEARCH_LIMIT"
+  | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_ERROR"
+  | "RESEARCH_VALIDATION_FAILED"
   | "INTERNAL_ERROR";
 
 export class RepositoryError extends Error {
@@ -64,6 +68,14 @@ type TurnRow = {
   research_summary: string;
   preferred_position: number;
   option_set_version: number;
+  run_provider: string | null;
+  provider_response_id: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  web_search_calls: number;
+  latency_ms: number;
   created_at: number;
 };
 
@@ -109,6 +121,13 @@ export async function createJourney(
   request: CreateJourneyRequest,
 ): Promise<JourneyDetail> {
   validateCreateRequest(request);
+  if (request.modelId !== "fixture-terra") {
+    throw new RepositoryError(
+      "BAD_REQUEST",
+      "Live models must use the foreground research route.",
+      400,
+    );
+  }
   const db = getD1();
   const seed = normalizeSeed(request.seed);
   await db
@@ -296,10 +315,19 @@ export async function getJourney(
     await Promise.all([
       db
         .prepare(
-          `SELECT id, parent_turn_id, depth, question, answer, answer_json, transition,
-                  topic_label, research_summary, preferred_position, option_set_version, created_at
-           FROM turns WHERE journey_id = ? AND status = 'ready'
-           ORDER BY created_at, depth`,
+          `SELECT t.id, t.parent_turn_id, t.depth, t.question, t.answer, t.answer_json,
+                  t.transition, t.topic_label, t.research_summary, t.preferred_position,
+                  t.option_set_version, t.created_at, r.provider AS run_provider,
+                  r.provider_response_id, COALESCE(r.input_tokens, 0) AS input_tokens,
+                  COALESCE(r.output_tokens, 0) AS output_tokens,
+                  COALESCE(r.reasoning_tokens, 0) AS reasoning_tokens,
+                  COALESCE(r.total_tokens, 0) AS total_tokens,
+                  COALESCE(r.web_search_calls, 0) AS web_search_calls,
+                  COALESCE(r.latency_ms, 0) AS latency_ms
+           FROM turns t
+           LEFT JOIN research_runs r ON r.turn_id = t.id
+           WHERE t.journey_id = ? AND t.status = 'ready'
+           ORDER BY t.created_at, t.depth`,
         )
         .bind(journeyId)
         .all<TurnRow>(),
@@ -399,6 +427,18 @@ export async function getJourney(
             sourceTitle: "WonderDrive",
             sourceUrl: "https://github.com/Mister-JP/WonderDrive",
           },
+      research: {
+        mode: turn.run_provider === "openai" ? "live" : "fixture",
+        providerResponseId: turn.provider_response_id,
+        usage: {
+          inputTokens: turn.input_tokens,
+          outputTokens: turn.output_tokens,
+          reasoningTokens: turn.reasoning_tokens,
+          totalTokens: turn.total_tokens,
+          webSearchCalls: turn.web_search_calls,
+          latencyMs: turn.latency_ms,
+        },
+      },
       createdAt: turn.created_at,
     };
   });
@@ -442,6 +482,13 @@ export async function advanceJourney(
   }
 
   const journey = await getJourney(viewer, journeyId);
+  if (journey.modelId !== "fixture-terra" && request.action !== "reject") {
+    throw new RepositoryError(
+      "BAD_REQUEST",
+      "Live journey choices must use the foreground research route.",
+      400,
+    );
+  }
   if (journey.version !== request.expectedVersion) {
     throw new RepositoryError(
       "VERSION_CONFLICT",
