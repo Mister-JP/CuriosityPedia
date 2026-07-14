@@ -29,10 +29,18 @@ export const PERFORMERS: Performer[] = [
 
 export const MODELS: ModelConfig[] = [
   {
+    id: "gpt-5.6-terra",
+    provider: "OpenAI",
+    name: "GPT-5.6 Terra · live",
+    disclosure: "Foreground web research · metered OpenAI usage",
+    mode: "live",
+  },
+  {
     id: "fixture-terra",
     provider: "OpenAI",
-    name: "OpenAI · Terra fixture",
-    disclosure: "Interface fixture · no model call in Phase 1",
+    name: "Terra · free demo",
+    disclosure: "Reviewed deterministic fixture · no provider charge",
+    mode: "fixture",
   },
 ];
 
@@ -48,14 +56,14 @@ export const STARTER_QUESTIONS = [
 export const PRESET_LABELS = {
   spark: {
     name: "Spark",
-    description: "A brisk fixture rehearsal",
+    description: "Up to one web search with a compact answer",
   },
   standard: {
     name: "Standard",
-    description: "The balanced Phase 1 path",
+    description: "Up to two web searches with balanced depth",
   },
   deep: {
     name: "Deep",
-    description: "A slower, denser stage replay",
+    description: "Up to three web searches and a fuller synthesis",
   },
 } as const;

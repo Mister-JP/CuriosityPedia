@@ -172,6 +172,15 @@ export const researchRuns = sqliteTable(
     })
       .notNull()
       .default("reserved"),
+    providerResponseId: text("provider_response_id"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    webSearchCalls: integer("web_search_calls").notNull().default(0),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
     startedAt: integer("started_at", { mode: "timestamp_ms" }),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
     createdAt,
@@ -179,6 +188,45 @@ export const researchRuns = sqliteTable(
   (table) => [
     uniqueIndex("research_runs_turn_unique").on(table.turnId),
     index("research_runs_journey_status_idx").on(table.journeyId, table.status),
+  ],
+);
+
+export const researchRequests = sqliteTable(
+  "research_requests",
+  {
+    id: text("id").primaryKey(),
+    identityId: text("identity_id")
+      .notNull()
+      .references(() => identities.id),
+    kind: text("kind", { enum: ["create", "advance"] }).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    requestJson: text("request_json").notNull(),
+    status: text("status", {
+      enum: ["reserved", "researching", "committed", "failed"],
+    })
+      .notNull()
+      .default("reserved"),
+    providerResponseId: text("provider_response_id"),
+    resultJourneyId: text("result_journey_id").references(() => journeys.id),
+    resultTurnId: text("result_turn_id").references(() => turns.id),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    reasoningTokens: integer("reasoning_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    webSearchCalls: integer("web_search_calls").notNull().default(0),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    createdAt,
+  },
+  (table) => [
+    uniqueIndex("research_requests_identity_key_unique").on(
+      table.identityId,
+      table.idempotencyKey,
+    ),
+    index("research_requests_identity_created_idx").on(table.identityId, table.createdAt),
   ],
 );
 

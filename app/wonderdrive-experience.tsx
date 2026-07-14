@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { MODELS, PERFORMERS, PRESET_LABELS, STARTER_QUESTIONS } from "../lib/catalog";
 import type {
   AdvanceJourneyRequest,
@@ -10,7 +18,12 @@ import type {
   JourneyDetail,
   JourneySummary,
   JourneyTurn,
+  Interlude,
+  LiveResearchRequest,
+  LiveResearchStreamEvent,
+  ModelId,
   PerformerId,
+  ResearchEvent,
   ResearchPreset,
   Viewer,
 } from "../lib/contracts";
@@ -19,6 +32,16 @@ type View = "start" | "journey" | "map" | "library" | "compare";
 
 type SessionPayload = {
   journeys: JourneySummary[];
+};
+
+type LiveResearchState = {
+  question: string;
+  message: string;
+  events: ResearchEvent[];
+  status: "running" | "complete" | "error";
+  result: JourneyDetail | null;
+  interlude: Omit<Interlude, "id"> | null;
+  error: string | null;
 };
 
 const navItems: Array<{ id: View; label: string }> = [
@@ -41,6 +64,7 @@ export function WonderDriveExperience() {
   const [error, setError] = useState<string | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [comparison, setComparison] = useState<CompareResult | null>(null);
+  const [liveResearch, setLiveResearch] = useState<LiveResearchState | null>(null);
 
   const refreshSession = useCallback(async () => {
     setError(null);
@@ -81,16 +105,48 @@ export function WonderDriveExperience() {
   async function create(config: {
     seed: string;
     performerId: PerformerId;
+    modelId: ModelId;
     researchPreset: ResearchPreset;
   }) {
     setMutation("create");
     setError(null);
     try {
+      if (config.modelId === "gpt-5.6-terra") {
+        setView("journey");
+        setLiveResearch({
+          question: config.seed,
+          message: "Connecting to live foreground research…",
+          events: [],
+          status: "running",
+          result: null,
+          interlude: null,
+          error: null,
+        });
+        const complete = await streamLiveResearch(
+          {
+            kind: "create",
+            ...config,
+            modelId: "gpt-5.6-terra",
+            idempotencyKey: crypto.randomUUID(),
+          },
+          setLiveResearch,
+        );
+        setViewer(complete.viewer);
+        setActiveJourney(complete.data);
+        setActiveTurnId(complete.data.currentTurnId);
+        setJourneys((current) => upsertSummary(current, complete.data));
+        setLiveResearch((current) =>
+          current
+            ? { ...current, status: "complete", result: complete.data, message: "Research committed" }
+            : current,
+        );
+        setReplaying(false);
+        return;
+      }
       const payload = await api<JourneyDetail>("/api/journeys", {
         method: "POST",
         body: JSON.stringify({
           ...config,
-          modelId: MODELS[0].id,
           idempotencyKey: crypto.randomUUID(),
         }),
       });
@@ -101,7 +157,11 @@ export function WonderDriveExperience() {
       setView("journey");
       setReplaying(true);
     } catch (cause) {
-      setError(messageFrom(cause));
+      const message = messageFrom(cause);
+      setError(message);
+      setLiveResearch((current) =>
+        current ? { ...current, status: "error", error: message, message: "Research stopped" } : null,
+      );
     } finally {
       setMutation(null);
     }
@@ -115,6 +175,47 @@ export function WonderDriveExperience() {
     setMutation(action);
     setError(null);
     try {
+      if (activeJourney.modelId === "gpt-5.6-terra" && action !== "reject") {
+        const fromTurn = activeJourney.turns.find((turn) => turn.id === input.turnId);
+        const selected =
+          action === "delegate"
+            ? fromTurn?.options.find((option) => option.position === fromTurn.preferredPosition)
+            : fromTurn?.options.find((option) => option.id === input.optionId);
+        if (!fromTurn || !selected) throw new Error("Choose one of the two current paths.");
+        setView("journey");
+        setLiveResearch({
+          question: selected.question,
+          message: "Opening the next live research turn…",
+          events: [],
+          status: "running",
+          result: null,
+          interlude: null,
+          error: null,
+        });
+        const complete = await streamLiveResearch(
+          {
+            kind: "advance",
+            journeyId: activeJourney.id,
+            fromTurnId: input.turnId,
+            action,
+            optionId: input.optionId,
+            expectedVersion: activeJourney.version,
+            idempotencyKey: crypto.randomUUID(),
+          },
+          setLiveResearch,
+        );
+        setViewer(complete.viewer);
+        setActiveJourney(complete.data);
+        setActiveTurnId(complete.data.currentTurnId);
+        setJourneys((current) => upsertSummary(current, complete.data));
+        setLiveResearch((current) =>
+          current
+            ? { ...current, status: "complete", result: complete.data, message: "Research committed" }
+            : current,
+        );
+        setReplaying(false);
+        return;
+      }
       const payload = await api<JourneyDetail>(
         `/api/journeys/${activeJourney.id}/advance`,
         {
@@ -142,6 +243,9 @@ export function WonderDriveExperience() {
     } catch (cause) {
       const message = messageFrom(cause);
       setError(message);
+      setLiveResearch((current) =>
+        current ? { ...current, status: "error", error: message, message: "Research stopped" } : null,
+      );
       if (message.toLowerCase().includes("another tab")) void openJourney(activeJourney.id);
     } finally {
       setMutation(null);
@@ -193,6 +297,7 @@ export function WonderDriveExperience() {
       return;
     }
     setView(next);
+    setLiveResearch(null);
     if (next === "compare") setComparison(null);
   }
 
@@ -235,8 +340,8 @@ export function WonderDriveExperience() {
       </header>
 
       <div className="phase-ribbon" role="note">
-        <span>Phase 1</span>
-        Deterministic research rehearsal · D1-saved journeys · no AI or live web request yet
+        <span>Phase 2</span>
+        Live foreground web research · cited performances · D1-saved journeys · no background jobs
       </div>
 
       {error && (
@@ -248,6 +353,22 @@ export function WonderDriveExperience() {
 
       {loading ? (
         <LoadingStage />
+      ) : liveResearch ? (
+        <LiveResearchStage
+          state={liveResearch}
+          onComplete={() => {
+            if (liveResearch.result) {
+              setActiveJourney(liveResearch.result);
+              setActiveTurnId(liveResearch.result.currentTurnId);
+            }
+            setLiveResearch(null);
+            setView("journey");
+          }}
+          onBack={() => {
+            setLiveResearch(null);
+            setView(activeJourney ? "journey" : "start");
+          }}
+        />
       ) : view === "start" ? (
         <StartStage onCreate={create} creating={mutation === "create"} journeyCount={journeys.length} />
       ) : view === "library" ? (
@@ -309,7 +430,7 @@ export function WonderDriveExperience() {
       )}
 
       <footer className="app-footer">
-        <p><span aria-hidden="true">W/01</span> One performer. One committed turn. Exactly two ways forward.</p>
+        <p><span aria-hidden="true">W/02</span> One performer. One researched turn. Exactly two ways forward.</p>
         <div>
           <a href="https://github.com/Mister-JP/WonderDrive">Source</a>
           <a href="https://github.com/Mister-JP/WonderDrive/blob/main/docs/WonderDrive_Final_Product_and_Engineering_Blueprint_v3_Research_First.docx">Product book</a>
@@ -324,33 +445,42 @@ function StartStage({
   creating,
   journeyCount,
 }: {
-  onCreate: (config: { seed: string; performerId: PerformerId; researchPreset: ResearchPreset }) => void;
+  onCreate: (config: {
+    seed: string;
+    performerId: PerformerId;
+    modelId: ModelId;
+    researchPreset: ResearchPreset;
+  }) => void;
   creating: boolean;
   journeyCount: number;
 }) {
   const [seed, setSeed] = useState<string>(STARTER_QUESTIONS[0]);
   const [performerId, setPerformerId] = useState<PerformerId>("archivist");
+  const [modelId, setModelId] = useState<ModelId>("gpt-5.6-terra");
   const [preset, setPreset] = useState<ResearchPreset>("standard");
   const performer = PERFORMERS.find((item) => item.id === performerId)!;
+  const model = MODELS.find((item) => item.id === modelId)!;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (seed.trim().length >= 3) onCreate({ seed, performerId, researchPreset: preset });
+    if (seed.trim().length >= 3) {
+      onCreate({ seed, performerId, modelId, researchPreset: preset });
+    }
   }
 
   return (
     <section className="start-stage" aria-labelledby="start-title">
       <div className="start-intro">
-        <p className="eyebrow"><span /> Live product rehearsal</p>
+        <p className="eyebrow"><span /> Live research performance</p>
         <h1 id="start-title">Give curiosity<br /><em>a direction.</em></h1>
         <p className="lede">
           Bring one honest question. Choose who will carry it. WonderDrive will
-          rehearse the research, perform a sourced answer, and return exactly two
+          research the open web, perform a sourced answer, and return exactly two
           next questions to you.
         </p>
-        <div className="contract-strip" aria-label="Phase 1 product contract">
+        <div className="contract-strip" aria-label="Phase 2 product contract">
           <span><strong>01</strong> saved to D1</span>
-          <span><strong>02</strong> replayable research</span>
+          <span><strong>02</strong> inspectable sources</span>
           <span><strong>03</strong> user-directed path</span>
         </div>
       </div>
@@ -387,11 +517,21 @@ function StartStage({
         </div>
 
         <fieldset>
-          <legend><span>2</span> Set the rehearsal</legend>
+          <legend><span>2</span> Set the research</legend>
           <div className="config-row">
-            <div className="model-ticket">
-              <span className="ticket-logo">OAI</span>
-              <span><strong>{MODELS[0].name}</strong><small>{MODELS[0].disclosure}</small></span>
+            <div className="model-selector" aria-label="Research model">
+              {MODELS.map((item) => (
+                <button
+                  type="button"
+                  className={`model-ticket ${modelId === item.id ? "selected" : ""}`}
+                  key={item.id}
+                  aria-pressed={modelId === item.id}
+                  onClick={() => setModelId(item.id)}
+                >
+                  <span className="ticket-logo">{item.mode === "live" ? "LIVE" : "DEMO"}</span>
+                  <span><strong>{item.name}</strong><small>{item.disclosure}</small></span>
+                </button>
+              ))}
             </div>
             <div className="preset-tabs" aria-label="Research depth">
               {(Object.keys(PRESET_LABELS) as ResearchPreset[]).map((id) => (
@@ -435,11 +575,98 @@ function StartStage({
         </fieldset>
 
         <button className="launch-button" type="submit" disabled={creating || seed.trim().length < 3}>
-          <span>{creating ? "Preparing the stage…" : "Begin the drive"}</span>
+          <span>{creating ? "Researching in the foreground…" : model.mode === "live" ? "Begin live research" : "Begin the free demo"}</span>
           <i aria-hidden="true">↘</i>
         </button>
-        <p className="honesty-note"><span aria-hidden="true">◉</span> Phase 1 generates this journey from reviewed fixtures. No provider usage is charged.</p>
+        <p className="honesty-note">
+          <span aria-hidden="true">◉</span>
+          {model.mode === "live"
+            ? "Live mode uses metered OpenAI tokens and web search. Keep this page open; no work continues in the background."
+            : "The free demo uses reviewed fixtures and makes no provider request."}
+        </p>
       </form>
+    </section>
+  );
+}
+
+function LiveResearchStage({
+  state,
+  onComplete,
+  onBack,
+}: {
+  state: LiveResearchState;
+  onComplete: () => void;
+  onBack: () => void;
+}) {
+  const resultTurn = state.result?.turns.find(
+    (turn) => turn.id === state.result?.currentTurnId,
+  );
+  const interlude = resultTurn?.interlude ?? state.interlude;
+  const progress = state.status === "complete" ? 100 : Math.min(92, 12 + state.events.length * 11);
+  return (
+    <section className="research-stage" aria-labelledby="live-research-title">
+      <div className="research-topline">
+        <p><span className="live-dot" /> Research Trail / live foreground run</p>
+        {state.status === "complete" ? (
+          <button type="button" onClick={onComplete}>Open performance <span>→</span></button>
+        ) : state.status === "error" ? (
+          <button type="button" onClick={onBack}>Return safely <span>→</span></button>
+        ) : (
+          <span className="foreground-note">Keep this page open</span>
+        )}
+      </div>
+      <div className="research-question">
+        <span>{state.message}</span>
+        <h1 id="live-research-title">{state.question}</h1>
+      </div>
+      <div className="research-layout">
+        <ol className="research-feed" aria-live="polite">
+          {state.events.length ? (
+            state.events.map((event) => (
+              <li key={event.id} className="visible">
+                <span>{String(event.sequence + 1).padStart(2, "0")}</span>
+                <i className={`event-icon ${event.kind}`} aria-hidden="true" />
+                <div><small>{event.kind}</small><p>{event.label}</p></div>
+                <strong aria-label="complete">✓</strong>
+              </li>
+            ))
+          ) : (
+            <li className="visible">
+              <span>01</span>
+              <i className="event-icon status" aria-hidden="true" />
+              <div><small>status</small><p>Reserving one foreground run—no background job is created…</p></div>
+            </li>
+          )}
+          {state.status === "error" && (
+            <li className="research-error visible">
+              <span>!</span>
+              <i className="event-icon check" aria-hidden="true" />
+              <div><small>not committed</small><p>{state.error}</p></div>
+            </li>
+          )}
+        </ol>
+        {interlude ? (
+          <aside className="interlude-card revealed">
+            <span>Curiosity interlude / sourced fact</span>
+            <blockquote>“{interlude.text}”</blockquote>
+            <a href={interlude.sourceUrl} target="_blank" rel="noreferrer">
+              {interlude.sourceTitle} ↗
+            </a>
+          </aside>
+        ) : (
+          <aside className="interlude-card research-holding-card">
+            <span>Evidence is arriving</span>
+            <blockquote>Sources and one thought-provoking fact will appear here after validation.</blockquote>
+            <small>WonderDrive shows activity and evidence—not private chain-of-thought.</small>
+          </aside>
+        )}
+      </div>
+      <div className="research-progress" aria-label={`${progress}% of live research complete`}>
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <p className="fixture-disclosure">
+        Live mode makes a metered OpenAI Responses request with web search. A turn is saved only after its source links, answer blocks, and exactly two paths pass validation.
+      </p>
     </section>
   );
 }
@@ -460,7 +687,7 @@ function ResearchReplay({ turn, onComplete }: { turn: JourneyTurn; onComplete: (
   return (
     <section className="research-stage" aria-labelledby="research-title">
       <div className="research-topline">
-        <p><span className="live-dot" /> Research Trail / fixture replay</p>
+        <p><span className="live-dot" /> Research Trail / {turn.research.mode === "live" ? "saved live activity" : "fixture replay"}</p>
         <button type="button" onClick={onComplete}>{complete ? "Open performance" : "Skip replay"} <span>→</span></button>
       </div>
       <div className="research-question">
@@ -488,7 +715,9 @@ function ResearchReplay({ turn, onComplete }: { turn: JourneyTurn; onComplete: (
         <span style={{ width: `${progress}%` }} />
       </div>
       <p className="fixture-disclosure">
-        This is a deterministic replay of stored, reviewed material. It demonstrates the complete research UX without claiming a live search or exposing private model reasoning.
+        {turn.research.mode === "live"
+          ? "This replays observable provider activity and sources saved with the turn. It never exposes private model reasoning."
+          : "This is a deterministic replay of stored, reviewed material. It demonstrates the research UX without claiming a live search or exposing private model reasoning."}
       </p>
     </section>
   );
@@ -541,7 +770,7 @@ function PerformanceStage({
         <article className="answer-panel">
           <div className="answer-byline">
             <span className={`performer-mark ${performer.accent}`}>{performer.mark}</span>
-            <div><strong>{performer.name}</strong><small>performed from a reviewed fixture</small></div>
+            <div><strong>{performer.name}</strong><small>{turn.research.mode === "live" ? "performed from live web research" : "performed from a reviewed fixture"}</small></div>
             <span className="ready-stamp">COMPOSED</span>
           </div>
           <div className="answer-copy">
@@ -569,7 +798,7 @@ function PerformanceStage({
           <p className="transition-line"><span>Where this leaves us</span>{turn.transition}</p>
 
           <details className="evidence-drawer">
-            <summary><span>Sources &amp; evidence</span><strong>{turn.sources.length} reviewed links</strong></summary>
+            <summary><span>Sources &amp; evidence</span><strong>{turn.sources.length} inspectable links</strong></summary>
             <ol>
               {turn.sources.map((source, index) => (
                 <li key={source.id}>
@@ -586,6 +815,14 @@ function PerformanceStage({
             <ul>
               {turn.researchEvents.map((event) => <li key={event.id}>{event.label}</li>)}
             </ul>
+            {turn.research.mode === "live" && (
+              <dl className="usage-strip">
+                <div><dt>Input</dt><dd>{turn.research.usage.inputTokens.toLocaleString()} tokens</dd></div>
+                <div><dt>Output</dt><dd>{turn.research.usage.outputTokens.toLocaleString()} tokens</dd></div>
+                <div><dt>Web</dt><dd>{turn.research.usage.webSearchCalls} searches</dd></div>
+                <div><dt>Elapsed</dt><dd>{Math.round(turn.research.usage.latencyMs / 1000)}s</dd></div>
+              </dl>
+            )}
           </details>
         </article>
 
@@ -617,7 +854,7 @@ function PerformanceStage({
           </button>
 
           <div className="reject-control">
-            <div><strong>Neither path?</strong><span>Ask for two replacements</span></div>
+            <div><strong>Neither path?</strong><span>Free deterministic redraw</span></div>
             <label>
               <span>Grounded</span>
               <input
@@ -814,6 +1051,70 @@ function LoadingStage() {
 
 function EmptyStage({ onOpenLibrary, label = "Open the journey library" }: { onOpenLibrary: () => void; label?: string }) {
   return <section className="empty-stage"><span aria-hidden="true">?</span><h1>No journey is on stage.</h1><p>Start a new question or return to one you have already saved.</p><button type="button" onClick={onOpenLibrary}>{label} →</button></section>;
+}
+
+async function streamLiveResearch(
+  request: LiveResearchRequest,
+  setState: Dispatch<SetStateAction<LiveResearchState | null>>,
+) {
+  const response = await fetch("/api/research", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const payload = (await response.json()) as ApiFailure;
+    throw new Error(payload.error?.message ?? "Live research could not start.");
+  }
+  if (!response.body) throw new Error("Live research did not return a readable stream.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let complete: Extract<LiveResearchStreamEvent, { type: "complete" }> | null = null;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as LiveResearchStreamEvent;
+        if (event.type === "started") {
+          setState((current) =>
+            current
+              ? { ...current, question: event.question, message: event.message }
+              : current,
+          );
+        } else if (event.type === "activity") {
+          setState((current) =>
+            current
+              ? {
+                  ...current,
+                  events: current.events.some((item) => item.id === event.event.id)
+                    ? current.events
+                    : [...current.events, event.event],
+                }
+              : current,
+          );
+        } else if (event.type === "interlude") {
+          setState((current) =>
+            current ? { ...current, interlude: event.interlude } : current,
+          );
+        } else if (event.type === "error") {
+          throw new Error(event.error.message);
+        } else if (event.type === "complete") {
+          complete = event;
+        }
+      }
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!complete) throw new Error("Live research ended before a turn was committed.");
+  return complete;
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<ApiSuccess<T>> {

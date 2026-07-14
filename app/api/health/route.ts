@@ -4,7 +4,7 @@ export async function GET() {
   return Response.json({
     status: "ok",
     product: "WonderDrive",
-    phase: 1,
+    phase: 2,
     capabilities: {
       publicShell: true,
       serverRoutes: true,
@@ -12,7 +12,12 @@ export async function GET() {
       durableJourneys: true,
       guestIdentity: true,
       deterministicResearchFixture: true,
-      liveResearch: false,
+      liveForegroundResearch: true,
+      openAIResponses: true,
+      webSearch: true,
+      structuredOutputValidation: true,
+      usageAccounting: true,
+      backgroundJobs: false,
     },
   });
 }
