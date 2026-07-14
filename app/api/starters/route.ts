@@ -6,9 +6,11 @@ import { getPersonalizedStarters } from "../../../lib/starter-recommendations";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const requested = new URL(request.url).searchParams.get("performer");
+  const searchParams = new URL(request.url).searchParams;
+  const requested = searchParams.get("performer");
   const performerId = PERFORMERS.some((performer) => performer.id === requested)
     ? requested as PerformerId
     : "sage";
-  return query(async (viewer) => ({ starters: await getPersonalizedStarters(viewer, performerId) }));
+  const refresh = searchParams.get("refresh") === "1";
+  return query(async (viewer) => ({ starters: await getPersonalizedStarters(viewer, performerId, { refresh }) }));
 }

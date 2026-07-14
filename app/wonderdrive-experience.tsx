@@ -97,7 +97,7 @@ export function WonderDriveExperience() {
       setJourneys(session.data.journeys);
       setCatalog(bootstrap.data.catalog);
       setPreferences(bootstrap.data.preferences);
-      void api<StarterPayload>("/api/starters?performer=sage")
+      void api<StarterPayload>("/api/starters?performer=sage&refresh=1")
         .then((payload) => setPersonalizedStarters(payload.data.starters))
         .catch(() => setPersonalizedStarters(bootstrap.data.catalog.discoveryStarters));
     } catch (cause) {
@@ -524,6 +524,7 @@ export function WonderDriveExperience() {
 function StartStage({
   onCreate,
   creating,
+  journeyCount,
   catalog,
   preferences,
   starters,
@@ -606,6 +607,21 @@ function StartStage({
     }
   }
 
+  async function refreshStarterQuestions() {
+    setStartersLoading(true);
+    try {
+      const payload = await api<StarterPayload>(
+        `/api/starters?performer=${encodeURIComponent(performerId)}&refresh=1`,
+      );
+      starterCache.current.set(performerId, payload.data.starters);
+      setVisibleStarters(recommendationsForPerformer(performerId, payload.data.starters));
+    } catch {
+      // Keep the current set visible if fresh discovery is temporarily unavailable.
+    } finally {
+      setStartersLoading(false);
+    }
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (seed.trim().length >= 3) {
@@ -631,8 +647,13 @@ function StartStage({
     <section className="start-stage-simple" aria-labelledby="start-title">
       <form className="start-console-simple" onSubmit={submit}>
         <div className="recommendation-heading">
-          <strong>{visibleStarters.length} questions for you</strong>
-          <span>{startersLoading ? `Refreshing in ${performer.name}’s style…` : `Shaped by ${performer.name} and your question history`}</span>
+          <div>
+            <strong>{visibleStarters.length} rabbit holes</strong>
+            <span>{startersLoading ? `Scanning what’s unfolding now…` : `Current signals + ${performer.name} + ${journeyCount ? "your history" : "wild-card domains"}`}</span>
+          </div>
+          <button type="button" className="refresh-starters" disabled={startersLoading} onClick={() => void refreshStarterQuestions()}>
+            <span aria-hidden="true">↻</span>{startersLoading ? "Hunting…" : "Find new questions"}
+          </button>
         </div>
         <div className="starter-marquee starter-marquee-simple" aria-label={`Questions suggested for ${performer.name}`}>
           <div className="starter-marquee-window">
@@ -739,7 +760,7 @@ function recommendationsForPerformer(
     question,
     topic: `${PERFORMERS.find((item) => item.id === performerId)?.name ?? "Performer"} pick`,
   }));
-  const combined = [...performerQuestions, ...personalized];
+  const combined = [...personalized, ...performerQuestions];
   return combined.filter(
     (item, index) => combined.findIndex((candidate) => candidate.question.toLowerCase() === item.question.toLowerCase()) === index,
   ).slice(0, 24);
@@ -1085,19 +1106,18 @@ function AnswerVisual({
   const showFallback = !media || failedUrl === media.imageUrl;
   return (
     <figure className={`contained-answer-media ${showFallback ? "visual-fallback" : ""} ${compact ? "compact-visual" : ""}`}>
-      {showFallback ? (
+      <div className="answer-visual-stage">
         <div className="fallback-art" role="img" aria-label={`Abstract illustration for ${topic}`}>
           <span className="fallback-orbit" aria-hidden="true" />
           <span className="fallback-mark" aria-hidden="true">{performerMark}</span>
           <strong>{topic}</strong>
           <small>WonderDrive field note</small>
         </div>
-      ) : (
-        <a href={media.sourcePageUrl} target="_blank" rel="noreferrer">
+        {!showFallback && <a className="answer-visual-source" href={media.sourcePageUrl} target="_blank" rel="noreferrer">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={media.imageUrl} alt={media.alt} loading="eager" referrerPolicy="no-referrer" onError={() => setFailedUrl(media.imageUrl)} />
-        </a>
-      )}
+        </a>}
+      </div>
       <figcaption>
         <span>{showFallback ? `A visual marker for ${topic}` : media.caption}</span>
         {!showFallback && <a href={media.sourcePageUrl} target="_blank" rel="noreferrer">Source ↗</a>}

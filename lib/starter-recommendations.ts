@@ -36,20 +36,23 @@ const STARTER_SCHEMA = {
 export async function getPersonalizedStarters(
   viewer: ViewerContext,
   performerId: PerformerId = "sage",
+  options: { refresh?: boolean } = {},
 ): Promise<PersonalizedStarter[]> {
   const topics = await orderedTopicHistory(viewer);
   const historyHash = await hashPayload({ performerId, topics });
   const performer = performerById(performerId);
-  const cached = await getD1()
-    .prepare(
-      `SELECT questions_json
-       FROM starter_recommendations
-       WHERE identity_id = ? AND history_hash = ? AND expires_at > ? LIMIT 1`,
-    )
-    .bind(viewer.identityId, historyHash, Date.now())
-    .first<{ questions_json: string }>();
-  const cachedQuestions = parseStarters(cached?.questions_json);
-  if (cachedQuestions) return cachedQuestions;
+  if (!options.refresh) {
+    const cached = await getD1()
+      .prepare(
+        `SELECT questions_json
+         FROM starter_recommendations
+         WHERE identity_id = ? AND history_hash = ? AND expires_at > ? LIMIT 1`,
+      )
+      .bind(viewer.identityId, historyHash, Date.now())
+      .first<{ questions_json: string }>();
+    const cachedQuestions = parseStarters(cached?.questions_json);
+    if (cachedQuestions) return cachedQuestions;
+  }
 
   if (!openAIConfigured()) return fallbackStarters(performerId);
 
@@ -57,17 +60,27 @@ export async function getPersonalizedStarters(
     const response = await requestOpenAI({
         model: "gpt-5.6-luna",
         instructions: [
-          `WonderDrive prompt ${PROMPT_VERSION}. Create 24 concise starting questions for a learner's curiosity ticker.`,
+          `WonderDrive prompt ${PROMPT_VERSION}. Create 24 concise, intensely nerdy starting questions for a learner's curiosity ticker.`,
+          "First use web search to scan what is unfolding now across science, computing, space, climate, engineering, archaeology, biology, mathematics, infrastructure, and other knowledge-rich domains.",
+          "Use current events as trapdoors into durable ideas, not as disposable headlines. Prefer hidden mechanisms, strange constraints, unresolved anomalies, obscure dependencies, measurement problems, failure modes, and surprising historical echoes.",
           "Use only the ordered topic history supplied below as personalization context. Do not infer private traits, repeat earlier questions, or mention personalization.",
           `Write through the ${performer.name} performer layer: ${performer.cue}`,
           `Voice: ${performer.voiceTraits.join(", ")}. Values: ${performer.values.join(", ")}. Avoid: ${performer.avoids.join(", ")}.`,
-          "Mix adjacent interests with a few tasteful departures. Every question should be researchable, vivid, and meaningfully different from the others.",
+          "Mix roughly eight history-adjacent rabbit holes, eight questions sparked by current developments, and eight lateral departures. If there is no history, redistribute those slots across current signals and wildly varied domains.",
+          "Every question must be researchable, vivid, meaningfully different, and specific enough to make a curious person open twelve tabs. Avoid generic prompts, broad explainers, self-help, listicles, celebrity news, and shallow 'what is' framing.",
+          "Do not ask directly about breaking tragedy or turn human suffering into entertainment. Label topics with the underlying domain, not a news outlet or headline.",
           "Return structured output only.",
         ].join("\n"),
-        input: topics.length
-          ? `Topics this learner has explored, oldest to newest:\n${topics.map((topic, index) => `${index + 1}. ${topic}`).join("\n")}`
-          : "This learner has no topic history yet. Offer a broad, varied first set.",
+        input: [
+          `Current discovery scan requested at ${new Date().toISOString()}.`,
+          topics.length
+            ? `Topics this learner has explored, oldest to newest:\n${topics.map((topic, index) => `${index + 1}. ${topic}`).join("\n")}`
+            : "This learner has no topic history yet. Offer a broad, varied first set.",
+        ].join("\n\n"),
         max_output_tokens: 1_800,
+        tools: [{ type: "web_search" }],
+        tool_choice: "auto",
+        max_tool_calls: 2,
         reasoning: { effort: "low" },
         text: structuredOutput("wonderdrive_starters", STARTER_SCHEMA),
         safety_identifier: `wd_starters_${viewer.identityId}`.slice(0, 64),
