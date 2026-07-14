@@ -660,7 +660,7 @@ function liveResearchStatements(
            provider_response_id, input_tokens, cached_input_tokens, output_tokens,
            reasoning_tokens, total_tokens, web_search_calls, page_fetches, latency_ms,
            estimated_cost_microusd, rate_effective_at, started_at, completed_at, created_at)
-         VALUES (?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         ids.runId,
@@ -704,7 +704,7 @@ function conditionalLiveResearchStatements(
            provider_response_id, input_tokens, cached_input_tokens, output_tokens,
            reasoning_tokens, total_tokens, web_search_calls, page_fetches, latency_ms,
            estimated_cost_microusd, rate_effective_at, started_at, completed_at, created_at)
-         SELECT ?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         SELECT ?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
            AND version = ? AND deleted_at IS NULL)`,
       )
