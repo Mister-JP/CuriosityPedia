@@ -249,6 +249,7 @@ export type CreateJourneyRequest = {
 export type AdvanceJourneyRequest = {
   fromTurnId: string;
   action: "choose" | "reject" | "delegate";
+  modelId?: ModelId;
   optionId?: string;
   adventure?: number;
   reason?: string;
@@ -272,6 +273,7 @@ export type LiveResearchRequest =
       journeyId: string;
       fromTurnId: string;
       action: "choose" | "delegate";
+      modelId?: ModelId;
       optionId?: string;
       expectedVersion: number;
       idempotencyKey: string;

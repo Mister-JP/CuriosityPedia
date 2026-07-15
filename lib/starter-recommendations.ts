@@ -10,6 +10,7 @@ import {
   structuredOutput,
 } from "./openai";
 import { hashPayload } from "./request";
+import { recordOpenAIUsage } from "./provider-usage";
 
 const STARTER_SCHEMA = {
   type: "object",
@@ -56,6 +57,9 @@ export async function getPersonalizedStarters(
 
   if (!openAIConfigured()) return fallbackStarters(performerId);
 
+  const startedAt = Date.now();
+  const purpose = options.refresh ? "manual_refresh" : "cache_miss_or_expired";
+  let usageRecorded = false;
   try {
     const response = await requestOpenAI({
         model: "gpt-5.6-luna",
@@ -87,8 +91,42 @@ export async function getPersonalizedStarters(
         safety_identifier: `wd_starters_${viewer.identityId}`.slice(0, 64),
         store: false,
     });
-    if (!response.ok) throw new Error(`starter provider status ${response.status}`);
-    const generated = parseStarters(outputText(await response.json()));
+    if (!response.ok) {
+      usageRecorded = true;
+      await recordOpenAIUsage({
+        identityId: viewer.identityId,
+        modelId: "gpt-5.6-luna",
+        operation: "starter_generation",
+        purpose,
+        outcome: "http_error",
+        providerRequestId: response.headers.get("x-request-id"),
+        httpStatus: response.status,
+        latencyMs: Date.now() - startedAt,
+        errorCode: `HTTP_${response.status}`,
+        errorMessage: "Starter generation provider request was rejected.",
+        metadata: { performerId, forcedRefresh: Boolean(options.refresh) },
+      });
+      throw new Error(`starter provider status ${response.status}`);
+    }
+    const payload = await response.json();
+    const generated = parseStarters(outputText(payload));
+    usageRecorded = true;
+    await recordOpenAIUsage({
+      identityId: viewer.identityId,
+      modelId: "gpt-5.6-luna",
+      operation: "starter_generation",
+      purpose,
+      outcome: generated ? "completed" : "validation_failed",
+      response: payload,
+      providerRequestId: response.headers.get("x-request-id"),
+      httpStatus: response.status,
+      latencyMs: Date.now() - startedAt,
+      ...(generated ? {} : {
+        errorCode: "SCHEMA_INVALID",
+        errorMessage: "Starter generation returned an invalid structured response.",
+      }),
+      metadata: { performerId, forcedRefresh: Boolean(options.refresh) },
+    });
     if (!generated) throw new Error("starter output was invalid");
     const now = Date.now();
     await getD1()
@@ -106,6 +144,19 @@ export async function getPersonalizedStarters(
       .run();
     return generated;
   } catch (error) {
+    if (!usageRecorded) {
+      await recordOpenAIUsage({
+        identityId: viewer.identityId,
+        modelId: "gpt-5.6-luna",
+        operation: "starter_generation",
+        purpose,
+        outcome: "transport_error",
+        latencyMs: Date.now() - startedAt,
+        errorCode: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+        errorMessage: error instanceof Error ? error.message : "Starter generation was interrupted.",
+        metadata: { performerId, forcedRefresh: Boolean(options.refresh) },
+      });
+    }
     console.error("WonderDrive starter generation failed", error);
     return fallbackStarters(performerId);
   }

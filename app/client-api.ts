@@ -21,6 +21,12 @@ export type LiveResearchState = {
   error: string | null;
 };
 
+export function starterRecommendationsUrl(performerId: PerformerId, forceRefresh = false) {
+  const query = new URLSearchParams({ performer: performerId });
+  if (forceRefresh) query.set("refresh", "1");
+  return `/api/starters?${query.toString()}`;
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<ApiSuccess<T>> {
   const response = await fetch(url, {
     ...init,

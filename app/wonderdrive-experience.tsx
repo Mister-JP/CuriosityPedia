@@ -39,6 +39,7 @@ import {
   api,
   type LiveResearchState,
   messageFrom,
+  starterRecommendationsUrl,
   streamLiveResearch,
 } from "./client-api";
 
@@ -82,6 +83,7 @@ export function WonderDriveExperience() {
   const [liveResearch, setLiveResearch] = useState<LiveResearchState | null>(null);
   const [catalog, setCatalog] = useState<BootstrapCatalog>(BOOTSTRAP_CATALOG);
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [nextModelId, setNextModelId] = useState<ModelId | null>(null);
   const [personalizedStarters, setPersonalizedStarters] = useState<PersonalizedStarter[]>(
     BOOTSTRAP_CATALOG.discoveryStarters,
   );
@@ -97,7 +99,7 @@ export function WonderDriveExperience() {
       setJourneys(session.data.journeys);
       setCatalog(bootstrap.data.catalog);
       setPreferences(bootstrap.data.preferences);
-      void api<StarterPayload>("/api/starters?performer=sage&refresh=1")
+      void api<StarterPayload>(starterRecommendationsUrl("sage"))
         .then((payload) => setPersonalizedStarters(payload.data.starters))
         .catch(() => setPersonalizedStarters(bootstrap.data.catalog.discoveryStarters));
     } catch (cause) {
@@ -133,6 +135,7 @@ export function WonderDriveExperience() {
   ) => {
     setViewer(nextViewer);
     setActiveJourney(detail);
+    setNextModelId(detail.modelId);
     setActiveTurnId(turnId);
     setView(view);
     if (syncLibrary) setJourneys((current) => upsertSummary(current, detail));
@@ -192,6 +195,7 @@ export function WonderDriveExperience() {
     input: { turnId: string; optionId?: string; adventure?: number; reason?: string },
   ) {
     if (!activeJourney) return;
+    const modelId = nextModelId ?? activeJourney.modelId;
     await runMutation(action, async () => {
       if (action !== "reject") {
         const fromTurn = activeJourney.turns.find((turn) => turn.id === input.turnId);
@@ -216,6 +220,7 @@ export function WonderDriveExperience() {
             journeyId: activeJourney.id,
             fromTurnId: input.turnId,
             action,
+            modelId,
             optionId: input.optionId,
             expectedVersion: activeJourney.version,
             idempotencyKey: crypto.randomUUID(),
@@ -237,6 +242,7 @@ export function WonderDriveExperience() {
           body: JSON.stringify({
             fromTurnId: input.turnId,
             action,
+            modelId,
             optionId: input.optionId,
             adventure: input.adventure,
             reason: input.reason,
@@ -347,9 +353,11 @@ export function WonderDriveExperience() {
           ) : (
             <span><strong>{viewer?.displayName ?? "Opening library…"}</strong><small>{viewer ? `${journeys.length}/${viewer.journeyLimit} saved` : "durable session"}</small></span>
           )}
-          {viewer?.mode === "guest" && (
-            <a href="/signin-with-chatgpt?return_to=%2F">Sign in</a>
-          )}
+          {viewer?.mode === "guest" ? (
+            <a className="identity-action" href="/signin-with-chatgpt?return_to=%2F">Sign in</a>
+          ) : viewer?.mode === "chatgpt" ? (
+            <a className="identity-action" href="/signout-with-chatgpt?return_to=%2F">Sign out</a>
+          ) : null}
         </div>
       </header>
 
@@ -457,6 +465,19 @@ export function WonderDriveExperience() {
         <div className="active-journey-shell">
           <nav className="journey-view-switcher" aria-label="Current journey views">
             <span>{activeJourney.title}</span>
+            <label className="journey-model-switcher">
+              <span>Next turn model</span>
+              <select
+                aria-label="Model for the next research turn"
+                disabled={mutation !== null}
+                value={nextModelId ?? activeJourney.modelId}
+                onChange={(event) => setNextModelId(event.target.value as ModelId)}
+              >
+                {catalog.models.map((model) => (
+                  <option key={model.id} value={model.id}>{model.name}</option>
+                ))}
+              </select>
+            </label>
             <div>
               <button type="button" className={view === "journey" ? "active" : ""} aria-current={view === "journey" ? "page" : undefined} onClick={() => setView("journey")}>Stage</button>
               <button type="button" className={view === "map" ? "active" : ""} aria-current={view === "map" ? "page" : undefined} onClick={() => setView("map")}>Journey map</button>
@@ -579,7 +600,7 @@ function StartStage({
     setVisibleStarters(recommendationsForPerformer(nextId, starters));
     setStartersLoading(true);
     try {
-      const payload = await api<StarterPayload>(`/api/starters?performer=${encodeURIComponent(nextId)}`);
+      const payload = await api<StarterPayload>(starterRecommendationsUrl(nextId));
       starterCache.current.set(nextId, payload.data.starters);
       if (performerIdRef.current === nextId) {
         setVisibleStarters(recommendationsForPerformer(nextId, payload.data.starters));
@@ -595,7 +616,7 @@ function StartStage({
     setStartersLoading(true);
     try {
       const payload = await api<StarterPayload>(
-        `/api/starters?performer=${encodeURIComponent(performerId)}&refresh=1`,
+        starterRecommendationsUrl(performerId, true),
       );
       starterCache.current.set(performerId, payload.data.starters);
       setVisibleStarters(recommendationsForPerformer(performerId, payload.data.starters));
