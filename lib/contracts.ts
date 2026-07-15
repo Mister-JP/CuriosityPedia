@@ -338,5 +338,43 @@ export type ApiFailure = {
       | "INTERNAL_ERROR";
     message: string;
     retryable: boolean;
+    diagnosticId?: string;
   };
+};
+
+export type DiagnosticIncident = {
+  diagnosticId: string;
+  kind: "create" | "advance";
+  status: "failed";
+  modelId: string;
+  researchPreset: string;
+  errorCode: string;
+  errorMessage: string;
+  providerRequestId: string | null;
+  providerResponseId: string | null;
+  httpStatus: number | null;
+  stage: string;
+  lastProviderEventType: string;
+  providerEventCount: number;
+  malformedEventCount: number;
+  outputDeltaCount: number;
+  sawProviderDone: boolean;
+  latencyMs: number;
+  createdAt: number;
+  completedAt: number | null;
+};
+
+export type DiagnosticsReport = {
+  retentionDays: number;
+  summary: {
+    requests24h: number;
+    failures24h: number;
+    failureRate24h: number;
+  };
+  repeatedFailures: Array<{
+    errorCode: string;
+    count: number;
+    latestAt: number;
+  }>;
+  incidents: DiagnosticIncident[];
 };

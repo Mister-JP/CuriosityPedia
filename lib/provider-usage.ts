@@ -52,6 +52,8 @@ type RecordProviderUsageInput = ProviderUsageContext & {
   metadata?: Record<string, string | number | boolean | null>;
 };
 
+const DIAGNOSTIC_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+
 export function summarizeOpenAIUsage(response: unknown, modelId: ModelId): OpenAIUsageSummary {
   const payload = isRecord(response) ? response : {};
   const usage = isRecord(payload.usage) ? payload.usage : {};
@@ -94,6 +96,7 @@ export async function recordOpenAIUsage(input: RecordProviderUsageInput): Promis
     return usage;
   }
   try {
+    const eventId = crypto.randomUUID();
     await db
       .prepare(
         `INSERT INTO provider_usage_events
@@ -102,10 +105,10 @@ export async function recordOpenAIUsage(input: RecordProviderUsageInput): Promis
            input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
            web_search_calls, page_fetches, estimated_cost_microusd, rate_effective_at,
            latency_ms, error_code, error_message, metadata_json, created_at)
-         VALUES (?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
-        crypto.randomUUID(),
+        eventId,
         input.identityId ?? null,
         input.journeyId ?? null,
         input.turnId ?? null,
@@ -132,6 +135,12 @@ export async function recordOpenAIUsage(input: RecordProviderUsageInput): Promis
         input.metadata ? JSON.stringify(input.metadata) : null,
         Date.now(),
       )
+      .run();
+    // Diagnostics are intentionally short-lived. Cleanup is opportunistic so
+    // it requires no cron, queue, or paid logging service.
+    await db
+      .prepare("DELETE FROM provider_usage_events WHERE created_at < ?")
+      .bind(Date.now() - DIAGNOSTIC_RETENTION_MS)
       .run();
   } catch (error) {
     // Provider work must not be discarded because analytics persistence failed.

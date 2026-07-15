@@ -8,6 +8,7 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | --- | --- |
 | [`app/api/bootstrap/route.ts`](../app/api/bootstrap/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/product-repository.ts`](../lib/product-repository.ts) |
 | [`app/api/compare/route.ts`](../app/api/compare/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/errors.ts`](../lib/errors.ts)<br>[`lib/repository.ts`](../lib/repository.ts) |
+| [`app/api/diagnostics/route.ts`](../app/api/diagnostics/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/diagnostics.ts`](../lib/diagnostics.ts) |
 | [`app/api/health/route.ts`](../app/api/health/route.ts) | — |
 | [`app/api/journeys/[journeyId]/advance/route.ts`](../app/api/journeys/[journeyId]/advance/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/live-redraw.ts`](../lib/live-redraw.ts)<br>[`lib/repository.ts`](../lib/repository.ts) |
 | [`app/api/journeys/[journeyId]/export/route.ts`](../app/api/journeys/[journeyId]/export/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/product-repository.ts`](../lib/product-repository.ts)<br>[`lib/viewer.ts`](../lib/viewer.ts) |
@@ -34,6 +35,7 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | [`lib/api.ts`](../lib/api.ts) | [`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/errors.ts`](../lib/errors.ts)<br>[`lib/viewer.ts`](../lib/viewer.ts) |
 | [`lib/catalog.ts`](../lib/catalog.ts) | [`lib/contracts.ts`](../lib/contracts.ts) |
 | [`lib/contracts.ts`](../lib/contracts.ts) | — |
+| [`lib/diagnostics.ts`](../lib/diagnostics.ts) | [`db/index.ts`](../db/index.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/errors.ts`](../lib/errors.ts)<br>[`lib/viewer.ts`](../lib/viewer.ts) |
 | [`lib/errors.ts`](../lib/errors.ts) | [`lib/contracts.ts`](../lib/contracts.ts) |
 | [`lib/fixtures.ts`](../lib/fixtures.ts) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts) |
 | [`lib/live-redraw.ts`](../lib/live-redraw.ts) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/errors.ts`](../lib/errors.ts)<br>[`lib/openai.ts`](../lib/openai.ts)<br>[`lib/provider-usage.ts`](../lib/provider-usage.ts) |
@@ -62,6 +64,7 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | [`scripts/generate-unified-information-loading-board.mjs`](../scripts/generate-unified-information-loading-board.mjs) | — |
 | [`tests/client-api.test.mjs`](../tests/client-api.test.mjs) | [`app/client-api.ts`](../app/client-api.ts) |
 | [`tests/cloudflare-loader.mjs`](../tests/cloudflare-loader.mjs) | — |
+| [`tests/diagnostics.test.mjs`](../tests/diagnostics.test.mjs) | [`lib/diagnostics.ts`](../lib/diagnostics.ts) |
 | [`tests/fixtures.test.mjs`](../tests/fixtures.test.mjs) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/fixtures.ts`](../lib/fixtures.ts) |
 | [`tests/live-research.test.mjs`](../tests/live-research.test.mjs) | [`lib/live-research.ts`](../lib/live-research.ts) |
 | [`tests/provider-usage.test.mjs`](../tests/provider-usage.test.mjs) | [`lib/provider-usage.ts`](../lib/provider-usage.ts) |

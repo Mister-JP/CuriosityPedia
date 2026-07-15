@@ -29,15 +29,17 @@ test("provider usage includes cached input, reasoning, searches, and dated prici
 });
 
 test("provider usage persists purpose, outcome, dimensions, and safe metadata", async () => {
-  let statement = "";
-  let values = [];
+  const writes = [];
   env.DB = {
     prepare(sql) {
-      statement = sql;
       return {
         bind(...input) {
-          values = input;
-          return { run: async () => ({ success: true }) };
+          return {
+            run: async () => {
+              writes.push({ statement: sql, values: input });
+              return { success: true };
+            },
+          };
         },
       };
     },
@@ -59,7 +61,10 @@ test("provider usage persists purpose, outcome, dimensions, and safe metadata", 
       latencyMs: 123,
       metadata: { performerId: "sage", forcedRefresh: true },
     });
+    const [{ statement, values }, cleanup] = writes;
     assert.match(statement, /INSERT INTO provider_usage_events/);
+    assert.equal((statement.match(/\?/g) ?? []).length, 26);
+    assert.equal(values.length, 26);
     assert.equal(values[1], "identity-usage");
     assert.equal(values[5], "gpt-5.4-nano");
     assert.equal(values[6], "starter_generation");
@@ -69,6 +74,8 @@ test("provider usage persists purpose, outcome, dimensions, and safe metadata", 
     assert.equal(values[10], "req_usage_write");
     assert.equal(values[17], 1);
     assert.deepEqual(JSON.parse(values[24]), { performerId: "sage", forcedRefresh: true });
+    assert.match(cleanup.statement, /DELETE FROM provider_usage_events WHERE created_at < \?/);
+    assert.equal(cleanup.values.length, 1);
   } finally {
     delete env.DB;
   }

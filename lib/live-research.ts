@@ -207,6 +207,30 @@ export async function runLiveResearch(
   let synthesisStarted = false;
   let usageRecorded = false;
   let providerRequestId: string | null = null;
+  let providerEventCount = 0;
+  let malformedEventCount = 0;
+  let outputDeltaCount = 0;
+  let lastProviderEventType = "none";
+  let sawProviderDone = false;
+
+  const observeProviderFrame = (kind: "event" | "done" | "malformed", type = "") => {
+    if (kind === "event") {
+      providerEventCount += 1;
+      lastProviderEventType = type || "unknown";
+    } else if (kind === "done") {
+      sawProviderDone = true;
+    } else {
+      malformedEventCount += 1;
+    }
+  };
+  const streamDiagnostics = (stage: string) => ({
+    stage,
+    providerEventCount,
+    malformedEventCount,
+    outputDeltaCount,
+    lastProviderEventType,
+    sawProviderDone,
+  });
 
   const addActivity = (kind: ResearchEvent["kind"], label: string, sourceId: string | null = null) => {
     const event: ResearchEvent = {
@@ -263,7 +287,7 @@ export async function runLiveResearch(
     if (!response.ok) {
       usageRecorded = true;
       await recordOpenAIUsage({
-        ...researchUsageContext(prepared),
+        ...researchUsageContext(prepared, streamDiagnostics("request_rejected")),
         outcome: "http_error",
         providerRequestId,
         httpStatus: response.status,
@@ -290,7 +314,7 @@ export async function runLiveResearch(
     if (!response.body) {
       usageRecorded = true;
       await recordOpenAIUsage({
-        ...researchUsageContext(prepared),
+        ...researchUsageContext(prepared, streamDiagnostics("missing_response_body")),
         outcome: "provider_failed",
         providerRequestId,
         httpStatus: response.status,
@@ -306,7 +330,7 @@ export async function runLiveResearch(
       );
     }
 
-    for await (const event of readServerSentEvents(response.body)) {
+    for await (const event of readServerSentEvents(response.body, observeProviderFrame)) {
       if (!event || typeof event !== "object") continue;
       const type = typeof event.type === "string" ? event.type : "";
       if (type.includes("web_search_call") && !searchStarted) {
@@ -314,6 +338,7 @@ export async function runLiveResearch(
         addActivity("search", "OpenAI began a live web search for relevant evidence");
       }
       if (type === "response.output_text.delta" && typeof event.delta === "string") {
+        outputDeltaCount += 1;
         outputText += event.delta;
         if (!synthesisStarted) {
           synthesisStarted = true;
@@ -329,7 +354,7 @@ export async function runLiveResearch(
           ? stringValue(event.response.incomplete_details.reason)
           : "unknown";
         await recordOpenAIUsage({
-          ...researchUsageContext(prepared),
+          ...researchUsageContext(prepared, streamDiagnostics("stream_incomplete")),
           outcome: "incomplete",
           response: event.response,
           providerRequestId,
@@ -351,7 +376,7 @@ export async function runLiveResearch(
         usageRecorded = true;
         const failedResponse = isObject(event.response) ? event.response : undefined;
         await recordOpenAIUsage({
-          ...researchUsageContext(prepared),
+          ...researchUsageContext(prepared, streamDiagnostics("stream_failed")),
           outcome: "provider_failed",
           response: failedResponse,
           providerRequestId,
@@ -373,7 +398,7 @@ export async function runLiveResearch(
     if (!usageRecorded) {
       usageRecorded = true;
       await recordOpenAIUsage({
-        ...researchUsageContext(prepared),
+        ...researchUsageContext(prepared, streamDiagnostics("transport_error")),
         outcome: "transport_error",
         response: completedResponse ?? undefined,
         providerRequestId,
@@ -407,7 +432,7 @@ export async function runLiveResearch(
   if (completedResponse) {
     usageRecorded = true;
     await recordOpenAIUsage({
-      ...researchUsageContext(prepared),
+      ...researchUsageContext(prepared, streamDiagnostics("stream_completed")),
       outcome: "completed",
       response: completedResponse,
       providerRequestId,
@@ -418,7 +443,7 @@ export async function runLiveResearch(
   if (!completedResponse) {
     if (!usageRecorded) {
       await recordOpenAIUsage({
-        ...researchUsageContext(prepared),
+        ...researchUsageContext(prepared, streamDiagnostics("missing_terminal_event")),
         outcome: "provider_failed",
         providerRequestId,
         httpStatus: response.status,
@@ -556,7 +581,10 @@ export async function runLiveResearch(
   };
 }
 
-function researchUsageContext(prepared: PreparedLiveResearch) {
+function researchUsageContext(
+  prepared: PreparedLiveResearch,
+  diagnosticMetadata: Record<string, string | number | boolean | null> = {},
+) {
   return {
     identityId: prepared.identityId,
     journeyId: prepared.journeyId,
@@ -570,6 +598,7 @@ function researchUsageContext(prepared: PreparedLiveResearch) {
       answerDensity: prepared.answerDensity,
       imagePreference: prepared.imagePreference,
       depth: prepared.depth,
+      ...diagnosticMetadata,
     },
   };
 }
@@ -1171,7 +1200,10 @@ function densityVerbosity(density: AnswerDensity) {
   return density === "brief" ? "low" : density === "rich" ? "high" : "medium";
 }
 
-async function* readServerSentEvents(stream: ReadableStream<Uint8Array>) {
+async function* readServerSentEvents(
+  stream: ReadableStream<Uint8Array>,
+  observe: (kind: "event" | "done" | "malformed", type?: string) => void = () => {},
+) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -1182,11 +1214,11 @@ async function* readServerSentEvents(stream: ReadableStream<Uint8Array>) {
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() ?? "";
       for (const frame of frames) {
-        const event = parseServerSentEvent(frame);
+        const event = parseServerSentEvent(frame, observe);
         if (event) yield event;
       }
       if (done) {
-        const finalEvent = parseServerSentEvent(buffer);
+        const finalEvent = parseServerSentEvent(buffer, observe);
         if (finalEvent) yield finalEvent;
         break;
       }
@@ -1196,16 +1228,26 @@ async function* readServerSentEvents(stream: ReadableStream<Uint8Array>) {
   }
 }
 
-function parseServerSentEvent(frame: string): Record<string, unknown> | null {
+function parseServerSentEvent(
+  frame: string,
+  observe: (kind: "event" | "done" | "malformed", type?: string) => void,
+): Record<string, unknown> | null {
   const data = frame
     .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
     .map((line) => line.slice(5).trimStart())
     .join("\n");
-  if (!data || data === "[DONE]") return null;
+  if (!data) return null;
+  if (data === "[DONE]") {
+    observe("done");
+    return null;
+  }
   try {
-    return JSON.parse(data) as Record<string, unknown>;
+    const event = JSON.parse(data) as Record<string, unknown>;
+    observe("event", typeof event.type === "string" ? event.type : "unknown");
+    return event;
   } catch {
+    observe("malformed");
     // Ignore non-JSON keepalive frames from the upstream stream.
     return null;
   }
