@@ -41,6 +41,8 @@ export const preferences = sqliteTable("preferences", {
   identityId: text("identity_id")
     .primaryKey()
     .references(() => identities.id),
+  interfaceLocale: text("interface_locale").notNull().default("en"),
+  defaultOutputLocale: text("default_output_locale").notNull().default("en"),
   answerDensity: text("answer_density", {
     enum: ["brief", "balanced", "rich"],
   })
@@ -95,6 +97,7 @@ export const journeys = sqliteTable(
     })
       .notNull()
       .default("when-useful"),
+    outputLocale: text("output_locale").notNull().default("en"),
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
     hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
     currentTurnId: text("current_turn_id"),
@@ -152,6 +155,7 @@ export const turns = sqliteTable(
     imagePreference: text("image_preference", {
       enum: ["avoid", "when-useful", "prefer"],
     }),
+    outputLocale: text("output_locale").notNull().default("en"),
     createdAt,
     readyAt: integer("ready_at", { mode: "timestamp_ms" }),
   },

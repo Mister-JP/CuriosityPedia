@@ -118,6 +118,7 @@ The browser sends IDs and an action, never a model-ready transcript. The server 
 - a research handoff of confirmed discoveries, uncertainty, unresolved threads, useful source leads, and a topic label;
 - rejection, unchosen, delegated, and reconnection signals selected for relevance;
 - audience density, factual-image, read-aloud, accessibility, and adventure/grounding preferences;
+- the saved interface locale and the immutable output locale selected for this journey and turn; source discovery is not restricted to that locale;
 - hard search, fetch, retrieved-token, output-token, wall-time, and dollar ceilings.
 
 Exclude full transcripts, copied pages, irrelevant old branches, secrets, PII, raw provider envelopes, and private reasoning.
@@ -143,6 +144,7 @@ Exclude full transcripts, copied pages, irrelevant old branches, secrets, PII, r
 7. The canonical displayed answer is the canonical read-aloud text. Browser speech is acceptable for P0.
 8. Graph, status, action, and comparison meaning never depend on color alone; the map has a list equivalent.
 9. Failure never creates a phantom node or advances the graph.
+10. The account preference localizes interface chrome and future learning output together. Each journey and turn records its output locale so existing content, read-aloud, exports, and branches retain the language in which they were created.
 
 ## Data and concurrency
 

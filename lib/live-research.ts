@@ -8,6 +8,7 @@ import type {
   ResearchHandoff,
   ResearchEvent,
   ResearchPreset,
+  SupportedLocale,
   Source,
   TurnMedia,
 } from "./contracts";
@@ -20,6 +21,7 @@ import {
   structuredOutput,
 } from "./openai";
 import { recordOpenAIUsage } from "./provider-usage";
+import { localeName } from "./i18n";
 
 export type PreparedLiveResearch = {
   requestId: string;
@@ -33,6 +35,7 @@ export type PreparedLiveResearch = {
   researchPreset: ResearchPreset;
   answerDensity: AnswerDensity;
   imagePreference: ImagePreference;
+  outputLocale: SupportedLocale;
   topicTrail: string[];
   journeyId?: string;
   fromTurnId?: string;
@@ -163,7 +166,7 @@ const TURN_SCHEMA = {
         additionalProperties: false,
         required: ["text", "citationUrls"],
         properties: {
-          text: { type: "string", minLength: 64, maxLength: 1_080 },
+          text: { type: "string", minLength: 20, maxLength: 1_080 },
           citationUrls: {
             type: "array",
             minItems: 1,
@@ -184,20 +187,20 @@ const TURN_SCHEMA = {
           sourcePageUrl: { type: "string", minLength: 6, maxLength: 2_458 },
           title: { type: "string", minLength: 3, maxLength: 116 },
           role: { type: "string", enum: ["object", "process", "result", "context", "comparison", "scale", "primary-source"] },
-          whyIncluded: { type: "string", minLength: 72, maxLength: 200 },
+          whyIncluded: { type: "string", minLength: 20, maxLength: 200 },
           whatToNotice: {
             type: "array",
             minItems: 2,
             maxItems: 2,
-            items: { type: "string", minLength: 36, maxLength: 120 },
+            items: { type: "string", minLength: 8, maxLength: 120 },
           },
-          learning: { type: "string", minLength: 72, maxLength: 200 },
+          learning: { type: "string", minLength: 20, maxLength: 200 },
           evidenceRelation: { type: "string", enum: ["shows", "illustrates", "contextualizes", "supports"] },
         },
       },
     },
-    transition: { type: "string", minLength: 28, maxLength: 504 },
-    researchSummary: { type: "string", minLength: 36, maxLength: 624 },
+    transition: { type: "string", minLength: 8, maxLength: 504 },
+    researchSummary: { type: "string", minLength: 12, maxLength: 624 },
     researchHandoff: {
       type: "object",
       additionalProperties: false,
@@ -219,7 +222,7 @@ const TURN_SCHEMA = {
         additionalProperties: false,
         required: ["question", "angle"],
         properties: {
-          question: { type: "string", minLength: 9, maxLength: 132 },
+          question: { type: "string", minLength: 3, maxLength: 132 },
           angle: { type: "string", minLength: 1, maxLength: 39 },
         },
       },
@@ -511,7 +514,7 @@ export async function runLiveResearch(
   const supplementalResponses: OpenAIResponse[] = [];
   let draft;
   try {
-    draft = validateAndMapTurn(modelTurn, providerSources, prepared.imagePreference, providerImages);
+    draft = validateAndMapTurn(modelTurn, providerSources, prepared.imagePreference, providerImages, prepared.outputLocale);
   } catch (error) {
     if (!(error instanceof RepositoryError) || error.code !== "CITATION_INVALID") throw error;
     addActivity("check", "A citation pointer did not match the consulted source set; repairing pointers once");
@@ -560,7 +563,7 @@ export async function runLiveResearch(
         modelTurn = pruneUnsupportedBlocks(modelTurn, repairResult.unsupportedIndexes);
       }
     }
-    draft = validateAndMapTurn(modelTurn, providerSources, prepared.imagePreference, providerImages);
+    draft = validateAndMapTurn(modelTurn, providerSources, prepared.imagePreference, providerImages, prepared.outputLocale);
     addActivity("check", "Revalidated the answer against the final consulted source set");
   }
   addActivity("synthesis", "Validated the sourced answer and exactly two distinct next paths");
@@ -675,14 +678,16 @@ function buildInstructions(performer: (typeof PERFORMERS)[number]): string {
     "For every answer block, copy one or more exact source URLs that the web search actually consulted into citationUrls.",
     "When factual images are requested, first decide what the learner would benefit from seeing, then search specifically for that visual rather than merely the broad topic. WonderDrive reads image URLs directly; do not place image URLs in the answer JSON or use generated imagery as evidence.",
     "Only keep an image when it adds specific evidence that the prose alone cannot show. Ignore decorative, generic, weakly related, duplicate, or ambiguous results.",
-    "For every image you keep, add one visualNotes entry keyed by its exact source page URL. The title must name the visible subject. whyIncluded must be 18–26 words and connect that specific image to a claim in the answer. whatToNotice must contain exactly two concrete visible observations of 9–15 words each. learning must be 18–26 words and state the takeaway without repeating whyIncluded. Never infer details that are not visibly supported. Return an empty visualNotes array when no image passes this bar.",
+    "For every image you keep, add one visualNotes entry keyed by its exact source page URL. The title must name the visible subject. whyIncluded and learning should each have the natural-language length of a concise 18–26-word English sentence. whatToNotice must contain exactly two similarly concise visible observations. Use the output language's normal segmentation and syntax. Never infer details that are not visibly supported. Return an empty visualNotes array when no image passes this bar.",
     "Return exactly two genuinely different next questions. Each must hook into one concrete fact, object, creature, place, event, or surprising detail in the visible answer—not just the broad topic.",
     "Write each question as a doorway for a curious beginner of any age who may be encountering the subject for the first time. They should not know the answer, but they should immediately understand what the question is asking. Do not reuse specialist terms from the answer unless their meaning is obvious from the question.",
-    "Make each question feel like a playable rabbit hole: 5–12 words, plain everyday language, one idea at a time, and fun to say out loud.",
+    "Make each question feel like a playable rabbit hole: about as short as a natural 5–12-word English question, using the output language's normal segmentation and syntax; use plain everyday language, one idea at a time, and wording that is fun to say out loud.",
     "Ask about something the learner can picture: what it does, why it happens, how it works, what might happen if it changed, or what it can be compared with.",
     "Prefer concrete wonder, odd comparisons, hidden abilities, vivid cause-and-effect, and small mysteries. For example: 'Could this frog freeze and wake up?', 'Why doesn't this bridge wobble apart?', or 'What else can navigate without eyes?'",
     "Avoid academic framing, stacked clauses, jargon, vague abstraction, quiz-like recall, and prompts that merely ask for more detail. Do not use formulations like 'How does X reflect broader Y?' or 'What are the implications of X for Y?'",
     "Return a compact researchHandoff with confirmed discoveries, uncertainties, unresolved threads, and source URLs as leads—not source bodies or hidden reasoning.",
+    "The request supplies a reader output language. Research and select sources in whichever languages provide the strongest evidence; never restrict web search to the output language.",
+    "Write every reader-facing natural-language field in that output language: topicLabel, answerBlocks.text, visualNotes, transition, researchSummary, researchHandoff prose, and both option questions and angles. Keep URLs unchanged. Preserve official names, identifiers, formulas, and short quotations when translation would change their meaning.",
   ].join("\n");
 }
 
@@ -694,6 +699,7 @@ function buildResearchInput(prepared: PreparedLiveResearch): string {
     `Question to research now: ${prepared.question}`,
     `Research preset: ${prepared.researchPreset} (${PRESETS.find((preset) => preset.id === prepared.researchPreset)?.description})`,
     `Answer density: ${prepared.answerDensity}`,
+    `Reader output language: ${localeName(prepared.outputLocale)} (${prepared.outputLocale}).`,
     `Factual image preference: ${prepared.imagePreference}. Do not return generated imagery as evidence.`,
     "Topics already covered on this route, oldest to newest. Treat this as navigation context, not evidence of the learner's knowledge or proficiency. This is the entire prior-content context; do not infer or request earlier questions, answers, sources, or transcripts:",
     context,
@@ -950,6 +956,7 @@ async function runCitationRecovery(
         "Choose sources for what they are qualified to establish. Prefer original or authoritative evidence for factual claims and reputable independent sources for explanation and context. Cross-check claims that are current, surprising, or contested.",
         "Preserve each block number and its role in the answer. Do not change any block that was not supplied.",
         "Write for a curious learner with no assumed specialist knowledge, explaining unavoidable jargon naturally without talking down to them. Never invent a URL or cite a search result that you did not consult.",
+        `Write the recovered prose in ${localeName(prepared.outputLocale)} (${prepared.outputLocale}). Search may use sources in any language.`,
       ].join("\n"),
       input: JSON.stringify({
         question: prepared.question,
@@ -1128,17 +1135,19 @@ function validateAndMapTurn(
   providerSources: ProviderSource[],
   imagePreference: ImagePreference = "when-useful",
   providerImages: ProviderImage[] = [],
+  outputLocale: SupportedLocale = "en",
 ) {
+  const compactScript = false;
   const topicLabel = boundedString(modelTurn.topicLabel, 2, 56, "topic label");
-  const transition = boundedString(modelTurn.transition, 35, 420, "transition");
+  const transition = boundedString(modelTurn.transition, compactScript ? 8 : 20, 420, "transition");
   const researchSummary = boundedString(
     modelTurn.researchSummary,
-    45,
+    compactScript ? 12 : 24,
     520,
     "research summary",
   );
   const researchHandoff = validateHandoff(modelTurn.researchHandoff, providerSources);
-  const media = imagePreference === "avoid" ? [] : validateMediaGallery(providerImages, topicLabel, modelTurn.visualNotes);
+  const media = imagePreference === "avoid" ? [] : validateMediaGallery(providerImages, topicLabel, modelTurn.visualNotes, outputLocale);
   if (modelTurn.preferredPosition !== 0 && modelTurn.preferredPosition !== 1) {
     throw validationFailure("The preferred path was invalid.");
   }
@@ -1148,7 +1157,7 @@ function validateAndMapTurn(
   const options = modelTurn.options.map((option, index) => {
     if (!isObject(option)) throw validationFailure(`Path ${index + 1} was invalid.`);
     return {
-      question: boundedString(option.question, 12, 110, `path ${index + 1}`),
+      question: boundedString(option.question, compactScript ? 3 : 7, 110, `path ${index + 1}`),
       angle: boundedString(option.angle, 2, 32, `path ${index + 1} angle`),
     };
   });
@@ -1179,7 +1188,7 @@ function validateAndMapTurn(
     const sourceIds = uniqueMatches.map((source) => stableKey(source.url));
     sourceIds.forEach((id) => citedSourceIds.add(id));
     return {
-      text: boundedString(block.text, 80, 900, `answer block ${index + 1}`),
+      text: boundedString(block.text, compactScript ? 20 : 48, 900, `answer block ${index + 1}`),
       sourceIds,
     };
   });
@@ -1456,12 +1465,18 @@ const VISUAL_STOP_WORDS = new Set([
   "about", "after", "also", "and", "are", "from", "have", "into", "more", "that", "the", "their", "this", "through", "with",
 ]);
 
-function words(value: string) {
-  return normalizeGeneratedProse(value).match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+function words(value: string, locale: SupportedLocale = "en") {
+  const normalized = normalizeGeneratedProse(value);
+  if (typeof Intl.Segmenter === "function") {
+    return [...new Intl.Segmenter(locale, { granularity: "word" }).segment(normalized)]
+      .filter((segment) => segment.isWordLike)
+      .map((segment) => segment.segment);
+  }
+  return normalized.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
 }
 
-function withinWordLimit(value: string, [minimum, maximum]: readonly [number, number]) {
-  const count = words(value).length;
+function withinWordLimit(value: string, [minimum, maximum]: readonly [number, number], locale: SupportedLocale) {
+  const count = words(value, locale).length;
   return count >= minimum && count <= maximum;
 }
 
@@ -1469,11 +1484,15 @@ function meaningfulWords(value: string) {
   return new Set(words(value).map((word) => word.toLowerCase()).filter((word) => word.length >= 4 && !VISUAL_STOP_WORDS.has(word)));
 }
 
-function isSpecificVisualNote(note: ModelVisualNote, caption: string) {
-  if (!withinWordLimit(note.whyIncluded, VISUAL_NOTE_WORD_LIMITS.whyIncluded)) return false;
+function isSpecificVisualNote(note: ModelVisualNote, caption: string, locale: SupportedLocale) {
+  const proseLimit = locale === "en" ? VISUAL_NOTE_WORD_LIMITS.whyIncluded : [8, 40] as const;
+  const noticeLimit = locale === "en" ? VISUAL_NOTE_WORD_LIMITS.notice : [4, 25] as const;
+  if (!withinWordLimit(note.whyIncluded, proseLimit, locale)) return false;
   if (!Array.isArray(note.whatToNotice) || note.whatToNotice.length !== 2) return false;
-  if (!note.whatToNotice.every((item) => withinWordLimit(item, VISUAL_NOTE_WORD_LIMITS.notice))) return false;
-  if (!withinWordLimit(note.learning, VISUAL_NOTE_WORD_LIMITS.learning)) return false;
+  if (!note.whatToNotice.every((item) => withinWordLimit(item, noticeLimit, locale))) return false;
+  if (!withinWordLimit(note.learning, proseLimit, locale)) return false;
+
+  if (locale !== "en") return true;
 
   const captionTerms = meaningfulWords(caption);
   if (!captionTerms.size) return false;
@@ -1481,7 +1500,12 @@ function isSpecificVisualNote(note: ModelVisualNote, caption: string) {
   return [...captionTerms].some((term) => noteTerms.has(term));
 }
 
-function validateMediaGallery(values: ProviderImage[], topicLabel: string, notes: ModelVisualNote[] = []): TurnMedia[] {
+function validateMediaGallery(
+  values: ProviderImage[],
+  topicLabel: string,
+  notes: ModelVisualNote[] = [],
+  outputLocale: SupportedLocale = "en",
+): TurnMedia[] {
   const seen = new Set<string>();
   const seenSources = new Set<string>();
   const gallery: TurnMedia[] = [];
@@ -1499,7 +1523,7 @@ function validateMediaGallery(values: ProviderImage[], topicLabel: string, notes
     if (thumbnailUrl && !isSafePublicImageUrl(thumbnailUrl)) continue;
     const caption = normalizeGeneratedProse(value.caption).slice(0, 384) || `Visual reference for ${topicLabel}`;
     const note = notesBySource.get(citationComparableUrl(sourcePageUrl) ?? "");
-    if (!note || !isSpecificVisualNote(note, caption)) continue;
+    if (!note || !isSpecificVisualNote(note, caption, outputLocale)) continue;
     seen.add(imageUrl);
     seenSources.add(sourcePageUrl);
     const title = normalizeGeneratedProse(note.title).slice(0, 116);

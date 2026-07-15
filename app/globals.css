@@ -30,6 +30,18 @@ body {
   font-size: 16px;
   line-height: 1.5;
 }
+[dir="rtl"] .article-journey-stage,
+[dir="rtl"] .map-view,
+[dir="rtl"] .library-view,
+[dir="rtl"] .compare-view,
+[dir="rtl"] .settings-view { text-align: start; }
+[dir="rtl"] .contained-answer-card,
+[dir="rtl"] .deep-dive-dialog,
+[dir="rtl"] .journey-path-card,
+[dir="rtl"] .selected-path-card { direction: rtl; }
+[dir="rtl"] .citation { direction: ltr; }
+[dir="rtl"] .journey-path-card i,
+[dir="rtl"] .launch-button i { transform: scaleX(-1); }
 button, input, textarea { color: inherit; font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }

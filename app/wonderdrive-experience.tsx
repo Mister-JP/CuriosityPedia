@@ -37,6 +37,7 @@ import type {
   UserPreferences,
   Viewer,
 } from "../lib/contracts";
+import { SUPPORTED_LOCALES, localeDirection } from "../lib/i18n";
 import {
   api,
   type LiveResearchState,
@@ -44,6 +45,7 @@ import {
   starterRecommendationsUrl,
   streamLiveResearch,
 } from "./client-api";
+import { I18nProvider, translate, useI18n } from "./i18n";
 
 type View = "start" | "journey" | "map" | "library" | "compare" | "settings";
 
@@ -89,6 +91,7 @@ export function WonderDriveExperience() {
   const [personalizedStarters, setPersonalizedStarters] = useState<PersonalizedStarter[]>(
     BOOTSTRAP_CATALOG.discoveryStarters,
   );
+  const t = (key: string, values?: Record<string, string | number>) => translate(preferences.interfaceLocale, key, values);
 
   const refreshSession = useCallback(async () => {
     setError(null);
@@ -163,13 +166,14 @@ export function WonderDriveExperience() {
     researchPreset: ResearchPreset;
     answerDensity: AnswerDensity;
     imagePreference: ImagePreference;
+    outputLocale: UserPreferences["defaultOutputLocale"];
   }) {
     await runMutation("create", async () => {
       setView("journey");
       setLiveResearch({
         question: config.seed,
         performerId: config.performerId,
-        message: "Connecting to live foreground research…",
+        message: t("Connecting to live foreground research…"),
         events: [],
         status: "running",
         result: null,
@@ -185,12 +189,12 @@ export function WonderDriveExperience() {
       presentJourney(complete.data, complete.viewer);
       setLiveResearch((current) =>
         current
-          ? { ...current, status: "complete", result: complete.data, message: "Research committed" }
+          ? { ...current, status: "complete", result: complete.data, message: t("Research committed") }
           : current,
       );
     }, (message) => {
       setLiveResearch((current) =>
-        current ? { ...current, status: "error", error: message, message: "Research stopped" } : null,
+        current ? { ...current, status: "error", error: message, message: t("Research stopped") } : null,
       );
     });
   }
@@ -208,12 +212,12 @@ export function WonderDriveExperience() {
           action === "delegate"
             ? fromTurn?.options.find((option) => option.position === fromTurn.preferredPosition)
             : fromTurn?.options.find((option) => option.id === input.optionId);
-        if (!fromTurn || !selected) throw new Error("Choose one of the two current paths.");
+        if (!fromTurn || !selected) throw new Error(t("Choose one of the two current paths."));
         setView("journey");
         setLiveResearch({
           question: selected.question,
           performerId: activeJourney.performerId,
-          message: "Opening the next live research turn…",
+          message: t("Opening the next live research turn…"),
           events: [],
           status: "running",
           result: null,
@@ -238,7 +242,7 @@ export function WonderDriveExperience() {
         presentJourney(complete.data, complete.viewer);
         setLiveResearch((current) =>
           current
-            ? { ...current, status: "complete", result: complete.data, message: "Research committed" }
+            ? { ...current, status: "complete", result: complete.data, message: t("Research committed") }
             : current,
         );
         return;
@@ -264,7 +268,7 @@ export function WonderDriveExperience() {
       });
     }, (message) => {
       setLiveResearch((current) =>
-        current ? { ...current, status: "error", error: message, message: "Research stopped" } : null,
+          current ? { ...current, status: "error", error: message, message: t("Research stopped") } : null,
       );
       if (message.toLowerCase().includes("another tab")) void openJourney(activeJourney.id);
     });
@@ -330,17 +334,18 @@ export function WonderDriveExperience() {
   }
 
   return (
+    <I18nProvider locale={preferences.interfaceLocale}>
     <main className={`app-shell text-${preferences.textSize} ${preferences.reduceMotion ? "reduce-motion" : ""}`}>
       <header className="app-header">
         <button className="wordmark" type="button" onClick={() => navigate("start")}>
           <span className="wordmark-mark" aria-hidden="true">W</span>
           <span>
             WonderDrive
-            <small>curiosity, performed</small>
+            <small>{t("curiosity, performed")}</small>
           </span>
         </button>
 
-        <nav className="app-nav" aria-label="WonderDrive views">
+        <nav className="app-nav" aria-label={t("WonderDrive views")}>
           {navItems.map((item) => (
             <button
               type="button"
@@ -349,7 +354,7 @@ export function WonderDriveExperience() {
               aria-current={view === item.id ? "page" : undefined}
               onClick={() => navigate(item.id)}
             >
-              {item.label}
+              {t(item.label)}
             </button>
           ))}
         </nav>
@@ -357,30 +362,30 @@ export function WonderDriveExperience() {
         <div className="identity-control">
           <span className={`identity-dot ${viewer?.mode ?? "loading"}`} aria-hidden="true" />
           {viewer?.mode === "chatgpt" ? (
-            <span><strong>{viewer.displayName}</strong><small>ChatGPT account</small></span>
+            <span><strong>{viewer.displayName}</strong><small>{t("ChatGPT account")}</small></span>
           ) : (
-            <span><strong>{viewer?.displayName ?? "Opening library…"}</strong><small>{viewer ? `${journeys.length}/${viewer.journeyLimit} saved` : "durable session"}</small></span>
+            <span><strong>{viewer?.displayName ?? t("Opening library…")}</strong><small>{viewer ? t("{count}/{limit} saved", { count: journeys.length, limit: viewer.journeyLimit }) : t("durable session")}</small></span>
           )}
           {viewer?.mode === "guest" ? (
-            <a className="identity-action" href="/signin-with-chatgpt?return_to=%2F">Sign in</a>
+            <a className="identity-action" href="/signin-with-chatgpt?return_to=%2F">{t("Sign in")}</a>
           ) : viewer?.mode === "chatgpt" ? (
-            <a className="identity-action" href="/signout-with-chatgpt?return_to=%2F">Sign out</a>
+            <a className="identity-action" href="/signout-with-chatgpt?return_to=%2F">{t("Sign out")}</a>
           ) : null}
         </div>
       </header>
 
       {view !== "start" && (
         <div className="phase-ribbon" role="note">
-          <span>Research first</span>
-          Same selected model researches and performs · inspectable sources · durable branching graph
+          <span>{t("Research first")}</span>
+          {t("Same selected model researches and performs · inspectable sources · durable branching graph")}
         </div>
       )}
 
       {viewer?.mode === "chatgpt" && viewer.hasGuestUpgrade && (
         <div className="upgrade-banner" role="status">
-          <span>Your guest library is still separate.</span>
+          <span>{t("Your guest library is still separate.")}</span>
           <button type="button" onClick={() => void upgradeGuestLibrary(setViewer, refreshSession, setError)}>
-            Move guest journeys into this account
+            {t("Move guest journeys into this account")}
           </button>
         </div>
       )}
@@ -388,13 +393,13 @@ export function WonderDriveExperience() {
       {error && (
         <div className="error-banner" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={() => { setError(null); void refreshSession(); }}>Reconnect</button>
+          <button type="button" onClick={() => { setError(null); void refreshSession(); }}>{t("Reconnect")}</button>
         </div>
       )}
       {notice && (
         <div className="notice-banner" role="status">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)}>Dismiss</button>
+          <button type="button" onClick={() => setNotice(null)}>{t("Dismiss")}</button>
         </div>
       )}
 
@@ -466,17 +471,21 @@ export function WonderDriveExperience() {
               });
               setViewer(payload.viewer);
               setPreferences(payload.data);
+              if (payload.data.defaultOutputLocale !== preferences.defaultOutputLocale) {
+                void api<StarterPayload>(starterRecommendationsUrl("sage", true))
+                  .then((startersPayload) => setPersonalizedStarters(startersPayload.data.starters));
+              }
             });
           }}
         />
       ) : activeJourney && activeTurn ? (
         <div className="active-journey-shell">
-          <nav className="journey-view-switcher" aria-label="Current journey views">
+          <nav className="journey-view-switcher" aria-label={t("Current journey views")}>
             <span>{activeJourney.title}</span>
             <label className="journey-model-switcher">
-              <span>Next turn model</span>
+              <span>{t("Next turn model")}</span>
               <select
-                aria-label="Model for the next research turn"
+                aria-label={t("Model for the next research turn")}
                 disabled={mutation !== null}
                 value={nextModelId ?? activeJourney.modelId}
                 onChange={(event) => setNextModelId(event.target.value as ModelId)}
@@ -487,8 +496,8 @@ export function WonderDriveExperience() {
               </select>
             </label>
             <div>
-              <button type="button" className={view === "journey" ? "active" : ""} aria-current={view === "journey" ? "page" : undefined} onClick={() => setView("journey")}>Stage</button>
-              <button type="button" className={view === "map" ? "active" : ""} aria-current={view === "map" ? "page" : undefined} onClick={() => setView("map")}>Journey map</button>
+              <button type="button" className={view === "journey" ? "active" : ""} aria-current={view === "journey" ? "page" : undefined} onClick={() => setView("journey")}>{t("Stage")}</button>
+              <button type="button" className={view === "map" ? "active" : ""} aria-current={view === "map" ? "page" : undefined} onClick={() => setView("map")}>{t("Journey map")}</button>
             </div>
           </nav>
           {view === "map" ? (
@@ -523,14 +532,15 @@ export function WonderDriveExperience() {
 
       {view !== "start" && (
         <footer className="app-footer">
-          <p><span aria-hidden="true">W/V3</span> One performer. One researched turn. Exactly two ways forward.</p>
+          <p><span aria-hidden="true">W/V3</span> {t("One performer. One researched turn. Exactly two ways forward.")}</p>
           <div>
-            <a href="https://github.com/Mister-JP/WonderDrive">Source</a>
-            <a href="https://github.com/Mister-JP/WonderDrive/blob/main/docs/WonderDrive_Final_Product_and_Engineering_Blueprint_v3_Research_First.docx">Product book</a>
+            <a href="https://github.com/Mister-JP/WonderDrive">{t("Source")}</a>
+            <a href="https://github.com/Mister-JP/WonderDrive/blob/main/docs/WonderDrive_Final_Product_and_Engineering_Blueprint_v3_Research_First.docx">{t("Product book")}</a>
           </div>
         </footer>
       )}
     </main>
+    </I18nProvider>
   );
 }
 
@@ -549,6 +559,7 @@ function StartStage({
     researchPreset: ResearchPreset;
     answerDensity: AnswerDensity;
     imagePreference: ImagePreference;
+    outputLocale: UserPreferences["defaultOutputLocale"];
   }) => void;
   creating: boolean;
   journeyCount: number;
@@ -556,6 +567,7 @@ function StartStage({
   preferences: UserPreferences;
   starters: PersonalizedStarter[];
 }) {
+  const { t } = useI18n();
   const [seed, setSeed] = useState("");
   const [performerId, setPerformerId] = useState<PerformerId>("sage");
   const [modelId, setModelId] = useState<ModelId>("gpt-5.6-luna");
@@ -645,6 +657,7 @@ function StartStage({
         researchPreset: "standard",
         answerDensity: preferences.answerDensity,
         imagePreference: preferences.imagePreference,
+        outputLocale: preferences.defaultOutputLocale,
       });
     }
   }
@@ -661,14 +674,14 @@ function StartStage({
       <form className="start-console-simple" onSubmit={submit}>
         <div className="recommendation-heading">
           <div>
-            <strong>{visibleStarters.length} rabbit holes</strong>
-            <span>{startersLoading ? `Scanning what’s unfolding now…` : `Current signals + ${performer.name} + ${journeyCount ? "your history" : "wild-card domains"}`}</span>
+            <strong>{visibleStarters.length} {t("rabbit holes")}</strong>
+            <span>{startersLoading ? t("Scanning what’s unfolding now…") : t("Current signals + {performer} + {context}", { performer: performer.name, context: t(journeyCount ? "your history" : "wild-card domains") })}</span>
           </div>
           <button type="button" className="refresh-starters" disabled={startersLoading} onClick={() => void refreshStarterQuestions()}>
-            <span aria-hidden="true">↻</span>{startersLoading ? "Hunting…" : "Find new questions"}
+            <span aria-hidden="true">↻</span>{t(startersLoading ? "Hunting…" : "Find new questions")}
           </button>
         </div>
-        <div className="starter-marquee starter-marquee-simple" aria-label={`Questions suggested for ${performer.name}`}>
+        <div className="starter-marquee starter-marquee-simple" aria-label={t("Questions suggested for {performer}", { performer: performer.name })}>
           <div className="starter-marquee-window">
             <div className="starter-marquee-track">
               {[0, 1].map((copy) => (
@@ -690,10 +703,10 @@ function StartStage({
           </div>
         </div>
 
-        <h1 id="start-title">What are you curious about?</h1>
+        <h1 id="start-title">{t("What are you curious about?")}</h1>
         <div className="question-field-shell">
           <label className="question-input question-input-simple">
-            <span className="sr-only">Starting question</span>
+            <span className="sr-only">{t("Starting question")}</span>
             <textarea
               value={seed}
               onChange={(event) => setSeed(event.target.value)}
@@ -703,37 +716,37 @@ function StartStage({
               rows={2}
               required
               aria-controls="question-autocomplete"
-              placeholder={preferences.reduceMotion ? placeholderQuestions[0] ?? "Ask anything…" : animatedPlaceholder}
+              placeholder={preferences.reduceMotion ? placeholderQuestions[0] ?? t("Ask anything…") : animatedPlaceholder}
             />
             <small>{seed.length}/280</small>
           </label>
           <div className="question-autocomplete" id="question-autocomplete" aria-live="polite">
             {autocompleteMatch ? (
               <button type="button" onClick={() => setSeed(autocompleteMatch.question)}>
-                <span>Tab to complete</span>{autocompleteMatch.question}
+                <span>{t("Tab to complete")}</span>{autocompleteMatch.question}
               </button>
             ) : exactMatch ? (
-              <span><strong>Recommended match</strong>{exactMatch.topic}</span>
+              <span><strong>{t("Recommended match")}</strong>{exactMatch.topic}</span>
             ) : (
-              <span className="question-autocomplete-idle">Start typing for recommendation matches</span>
+              <span className="question-autocomplete-idle">{t("Start typing for recommendation matches")}</span>
             )}
           </div>
         </div>
 
         <div className="start-selectors">
           <label>
-            <span>Performer</span>
+            <span>{t("Performer")}</span>
             <span className="start-select-wrap">
               <span className="performer-mark" aria-hidden="true">{performer.mark}</span>
               <select value={performerId} onChange={(event) => void choosePerformer(event.target.value as PerformerId)}>
                 {catalog.performers.map((item) => (
-                  <option value={item.id} key={item.id}>{item.name} — {item.role}</option>
+                  <option value={item.id} key={item.id}>{item.name} — {t(item.role)}</option>
                 ))}
               </select>
             </span>
           </label>
           <label>
-            <span>Model</span>
+            <span>{t("Model")}</span>
             <span className="start-select-wrap model-select-wrap">
               <select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)}>
                 {catalog.models.map((item) => (
@@ -747,18 +760,18 @@ function StartStage({
         </div>
 
         <div className={`performer-layer ${performer.accent}`}>
-          <span>{performer.name} will carry this question</span>
-          <p>{performer.cue}</p>
-          <small>{performer.voiceTraits.join(" · ")}</small>
+          <span>{t("{performer} will carry this question", { performer: performer.name })}</span>
+          <p>{t(performer.cue)}</p>
+          <small>{performer.voiceTraits.map((trait) => t(trait)).join(" · ")}</small>
         </div>
 
         <button className="launch-button launch-button-simple" type="submit" disabled={creating || seed.trim().length < 3}>
-          <span>{creating ? "Researching in the foreground…" : "Begin the wonder"}</span>
+          <span>{t(creating ? "Researching in the foreground…" : "Begin the wonder")}</span>
           <i aria-hidden="true">→</i>
         </button>
         <p className="honesty-note">
           <span aria-hidden="true">◉</span>
-          {model.disclosure} Input/output prices shown per 1M tokens; search is metered separately.
+          {t(model.disclosure)} {t("Input/output prices shown per 1M tokens; search is metered separately.")}
         </p>
       </form>
     </section>
@@ -827,6 +840,7 @@ function JourneyBufferingStage({
   onComplete: () => void;
   onBack: () => void;
 }) {
+  const { t } = useI18n();
   useEffect(() => {
     if (state.status !== "complete") return;
     const timer = window.setTimeout(onComplete, 650);
@@ -839,20 +853,20 @@ function JourneyBufferingStage({
     <section className="performance-stage buffering-stage" aria-labelledby="buffering-title" aria-busy={state.status === "running"}>
       <header className="performance-header buffering-header">
         <div>
-          <p className="eyebrow"><span /> Next turn · {performer.name}</p>
+          <p className="eyebrow"><span /> {t("Next turn")} · {performer.name}</p>
           <h1 id="buffering-title">{state.question}</h1>
         </div>
         <div className={`buffering-status ${state.status}`} role="status" aria-live="polite">
           <span className="buffering-dot" aria-hidden="true" />
-          <strong>{state.status === "complete" ? "Answer ready" : state.status === "error" ? "Research stopped" : state.retryAttempt > 0 ? `Retrying ${state.retryAttempt} of ${state.maxRetries}` : "Buffering answer"}</strong>
-          <small>{state.status === "running" ? state.message : state.status === "complete" ? "Placing the answer into this card" : "Nothing incomplete was saved"}</small>
+          <strong>{state.status === "complete" ? t("Answer ready") : state.status === "error" ? t("Research stopped") : state.retryAttempt > 0 ? t("Retrying {attempt} of {max}", { attempt: state.retryAttempt, max: state.maxRetries }) : t("Buffering answer")}</strong>
+          <small>{state.status === "running" ? state.message : state.status === "complete" ? t("Placing the answer into this card") : t("Nothing incomplete was saved")}</small>
         </div>
       </header>
 
       <article className="buffering-answer-card">
         <div className="buffering-byline">
           <span className={`performer-mark ${performer.accent}`}>{performer.mark}</span>
-          <div><strong>{performer.name}</strong><small>researching in this foreground turn</small></div>
+          <div><strong>{performer.name}</strong><small>{t("researching in this foreground turn")}</small></div>
           <span className="buffering-ellipsis" aria-hidden="true"><i /><i /><i /></span>
         </div>
 
@@ -860,11 +874,11 @@ function JourneyBufferingStage({
           <div className="buffering-error" role="alert">
             <span aria-hidden="true">!</span>
             <div>
-              <strong>This turn was not committed</strong>
+              <strong>{t("This turn was not committed")}</strong>
               <p>{state.error}</p>
               {state.diagnosticId && <code>Diagnostic {formatDiagnosticId(state.diagnosticId)}</code>}
             </div>
-            <button type="button" onClick={onBack}>Return safely →</button>
+            <button type="button" onClick={onBack}>{t("Return safely")} →</button>
           </div>
         ) : (
           <>
@@ -884,10 +898,10 @@ function JourneyBufferingStage({
       </article>
 
       <section className="buffering-directions" aria-hidden="true">
-        <p>Choose the next direction</p>
-        <h2>Where should curiosity go next?</h2>
+        <p>{t("Choose the next direction")}</p>
+        <h2>{t("Where should curiosity go next?")}</h2>
         <div><span /><span /></div>
-        <small>Two paths will appear here when the answer is ready.</small>
+        <small>{t("Two paths will appear here when the answer is ready.")}</small>
       </section>
     </section>
   );
@@ -912,6 +926,7 @@ function PerformanceStage({
   speechRate: number;
   onSnapshot: () => void;
 }) {
+  const { t, locale } = useI18n();
   const [adventure, setAdventure] = useState(50);
   const [reason, setReason] = useState("");
   const [speaking, setSpeaking] = useState(false);
@@ -950,7 +965,7 @@ function PerformanceStage({
           href={turn.sources[sourceIndex].url}
           target="_blank"
           rel="noreferrer"
-          aria-label={`Source ${sourceIndex + 1}: ${turn.sources[sourceIndex].title}`}
+          aria-label={`${t("Source")} ${sourceIndex + 1}: ${turn.sources[sourceIndex].title}`}
         >
           {sourceIndex + 1}
         </a>
@@ -967,6 +982,11 @@ function PerformanceStage({
     }
     const utterance = new SpeechSynthesisUtterance(`${turn.question}. ${turn.answer}. ${turn.transition}`);
     utterance.rate = speechRate;
+    utterance.lang = turn.metadata.outputLocale;
+    const voices = window.speechSynthesis.getVoices();
+    utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === turn.metadata.outputLocale.toLowerCase())
+      ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(turn.metadata.outputLocale.split("-")[0].toLowerCase()))
+      ?? null;
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
     window.speechSynthesis.speak(utterance);
@@ -974,22 +994,22 @@ function PerformanceStage({
   }
 
   return (
-    <section className="performance-stage article-journey-stage" aria-labelledby="performance-title">
+    <section className="performance-stage article-journey-stage" aria-labelledby="performance-title" lang={turn.metadata.outputLocale} dir={localeDirection(turn.metadata.outputLocale)}>
       <header className="performance-header article-journey-header">
         <div>
-          <p className="eyebrow"><span /> Turn {turn.depth + 1} · {performer.name}</p>
+          <p className="eyebrow"><span /> {t("Turn {number}", { number: turn.depth + 1 })} · {performer.name}</p>
           <h1 id="performance-title">{turn.question}</h1>
         </div>
         <div className="stage-metrics">
-          <span><strong>{journey.turnCount}</strong> turns</span>
-          <span><strong>{journey.sourceCount}</strong> sources</span>
+          <span>{t("{count} turns", { count: journey.turnCount })}</span>
+          <span>{t("{count} sources", { count: journey.sourceCount })}</span>
         </div>
       </header>
 
       {historical && (
         <div className="branch-notice" role="note">
           <span aria-hidden="true">⑂</span>
-          <p><strong>You are revisiting an earlier turn.</strong> Choosing a path here creates a visible branch; your existing turns stay in the map.</p>
+          <p><strong>{t("You are revisiting an earlier turn.")}</strong> {t("Choosing a path here creates a visible branch; your existing turns stay in the map.")}</p>
         </div>
       )}
 
@@ -997,16 +1017,16 @@ function PerformanceStage({
         <div className="contained-answer-topline">
           <div className="answer-byline compact-byline">
             <span className={`performer-mark ${performer.accent}`}>{performer.mark}</span>
-            <div><strong>{performer.name}</strong><small>performed from live web research</small></div>
-            <span className="ready-stamp">COMPOSED</span>
+            <div><strong>{performer.name}</strong><small>{t("performed from live web research")}</small></div>
+            <span className="ready-stamp">{t("COMPOSED")}</span>
           </div>
           <div className="contained-answer-tools">
-            <button type="button" onClick={toggleSpeech}>{speaking ? "Stop reading" : "Read aloud"}</button>
+            <button type="button" onClick={toggleSpeech}>{t(speaking ? "Stop reading" : "Read aloud")}</button>
             <details className="answer-overflow">
-              <summary aria-label="Save and export options">•••</summary>
+              <summary aria-label={t("Save and export options")}>•••</summary>
               <div>
-                <button type="button" disabled={busy !== null} onClick={onSnapshot}>Save snapshot</button>
-                <a href={`/api/journeys/${journey.id}/export`}>Export JSON</a>
+                <button type="button" disabled={busy !== null} onClick={onSnapshot}>{t("Save snapshot")}</button>
+                <a href={`/api/journeys/${journey.id}/export`}>{t("Export JSON")}</a>
               </div>
             </details>
           </div>
@@ -1014,31 +1034,31 @@ function PerformanceStage({
 
         <div className="contained-answer-content">
           <div className="contained-answer-summary">
-            <p className="card-kicker">The answer</p>
+            <p className="card-kicker">{t("The answer")}</p>
             <h2>{turn.topicLabel}</h2>
             <div className="contained-answer-prose">
               {turn.answerBlocks.slice(0, 1).map((block, blockIndex) => (
                 <p key={`${turn.id}-answer-${blockIndex}`}>{block.text} {citations(block.sourceIds)}</p>
               ))}
             </div>
-            <div className="answer-tags" aria-label="Answer characteristics">
+            <div className="answer-tags" aria-label={t("Answer characteristics")}>
               <span>{turn.topicLabel}</span>
-              <span>{turn.sources.length} checked sources</span>
-              <span>live research</span>
+              <span>{t("{count} checked sources", { count: turn.sources.length })}</span>
+              <span>{t("live research")}</span>
             </div>
             <button ref={deepDiveTriggerRef} className="evidence-research-row" type="button" onClick={() => setDeepDiveOpen(true)}>
-              <span><strong>Evidence &amp; research details</strong></span>
-              <span className="deep-dive-cta">Deeper dive ↗</span>
+              <span><strong>{t("Evidence & research details")}</strong></span>
+              <span className="deep-dive-cta">{t("Deeper dive")} ↗</span>
             </button>
           </div>
 
-          <AnswerVisual media={turn.media} />
+          <AnswerVisual media={turn.media} outputLocale={turn.metadata.outputLocale} />
         </div>
       </article>
 
       <section className="journey-directions" aria-labelledby="direction-title">
-        <p className="panel-index">Choose the next direction</p>
-        <h2 id="direction-title">Where should curiosity go next?</h2>
+        <p className="panel-index">{t("Choose the next direction")}</p>
+        <h2 id="direction-title">{t("Where should curiosity go next?")}</h2>
         <div className="journey-path-grid">
           {turn.options.map((option, index) => (
             <button
@@ -1055,18 +1075,18 @@ function PerformanceStage({
           ))}
         </div>
         <div className="journey-secondary-actions">
-          <button type="button" disabled={!actionable || busy !== null} onClick={onDelegate}>✦ Let {performer.name.replace("The ", "")} choose</button>
-          <button type="button" aria-expanded={redrawOpen} onClick={() => setRedrawOpen((open) => !open)}>Neither question works {redrawOpen ? "⌃" : "⌄"}</button>
+          <button type="button" disabled={!actionable || busy !== null} onClick={onDelegate}>✦ {t("Let {performer} choose", { performer: performer.name.replace("The ", "") })}</button>
+          <button type="button" aria-expanded={redrawOpen} onClick={() => setRedrawOpen((open) => !open)}>{t("Neither question works")} {redrawOpen ? "⌃" : "⌄"}</button>
         </div>
         {redrawOpen && (
           <div className="redraw-panel">
-            <div className="redraw-modes" aria-label="Replacement question direction">
-              <button type="button" className={adventure === 20 ? "active" : ""} onClick={() => setAdventure(20)}>Practical</button>
-              <button type="button" className={adventure === 78 ? "active" : ""} onClick={() => setAdventure(78)}>Surprising</button>
-              <button type="button" className={adventure === 50 ? "active" : ""} onClick={() => setAdventure(50)}>Different direction</button>
+            <div className="redraw-modes" aria-label={t("Replacement question direction")}>
+              <button type="button" className={adventure === 20 ? "active" : ""} onClick={() => setAdventure(20)}>{t("Practical")}</button>
+              <button type="button" className={adventure === 78 ? "active" : ""} onClick={() => setAdventure(78)}>{t("Surprising")}</button>
+              <button type="button" className={adventure === 50 ? "active" : ""} onClick={() => setAdventure(50)}>{t("Different direction")}</button>
             </div>
-            <label className="redraw-note"><span>Optional note</span><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={280} placeholder="What should change about the next two questions?" /></label>
-            <button className="redraw-submit" type="button" disabled={!actionable || busy !== null} onClick={() => onReject(adventure, reason.trim() || undefined)}>{busy === "reject" ? "Replacing…" : "Generate two new questions"}</button>
+            <label className="redraw-note"><span>{t("Optional note")}</span><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={280} placeholder={t("What should change about the next two questions?")} /></label>
+            <button className="redraw-submit" type="button" disabled={!actionable || busy !== null} onClick={() => onReject(adventure, reason.trim() || undefined)}>{t(busy === "reject" ? "Replacing…" : "Generate two new questions")}</button>
           </div>
         )}
       </section>
@@ -1075,29 +1095,29 @@ function PerformanceStage({
         <div className="deep-dive-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeepDiveOpen(false); }}>
           <section className="deep-dive-dialog" role="dialog" aria-modal="true" aria-labelledby="deep-dive-title">
             <header>
-              <div><p>Deeper dive · Turn {turn.depth + 1}</p><h2 id="deep-dive-title">{turn.question}</h2></div>
-              <button ref={deepDiveCloseRef} type="button" onClick={() => setDeepDiveOpen(false)} aria-label="Close deeper dive">×</button>
+              <div><p>{t("Deeper dive")} · {t("Turn {number}", { number: turn.depth + 1 })}</p><h2 id="deep-dive-title">{turn.question}</h2></div>
+              <button ref={deepDiveCloseRef} type="button" onClick={() => setDeepDiveOpen(false)} aria-label={t("Close deeper dive")}>×</button>
             </header>
             <div className="deep-dive-layout has-media">
               <div className="deep-dive-answer">
                 {turn.answerBlocks.map((block, blockIndex) => <p key={`${turn.id}-deep-${blockIndex}`}>{block.text} {citations(block.sourceIds)}</p>)}
               </div>
               <aside className="deep-dive-evidence">
-                <AnswerVisual media={turn.media} compact />
-                <h3>Sources</h3>
-                <ol>{turn.sources.map((source, index) => <li key={source.id}><span>{index + 1}</span><div><strong>{source.title}</strong><small>{source.publisher} · {source.relation}</small></div><a href={source.url} target="_blank" rel="noreferrer">Open ↗</a></li>)}</ol>
+                <AnswerVisual media={turn.media} outputLocale={turn.metadata.outputLocale} compact />
+                <h3>{t("Sources")}</h3>
+                <ol>{turn.sources.map((source, index) => <li key={source.id}><span>{index + 1}</span><div dir="auto"><strong>{source.title}</strong><small>{source.publisher} · {source.relation}</small></div><a href={source.url} target="_blank" rel="noreferrer">{t("Open")} ↗</a></li>)}</ol>
               </aside>
             </div>
             <div className="deep-dive-research">
-              <div><span>Research summary</span><p>{turn.researchSummary}</p></div>
+              <div><span>{t("Research summary")}</span><p>{turn.researchSummary}</p></div>
               <dl>
-                <div><dt>Model</dt><dd>{turn.metadata.provider} · {turn.metadata.modelId}</dd></div>
-                <div><dt>Research</dt><dd>{turn.metadata.researchPreset} · {turn.metadata.answerDensity}</dd></div>
-                <div><dt>Prompt</dt><dd>{turn.metadata.promptVersion}</dd></div>
-                <div><dt>Researched</dt><dd>{new Date(turn.metadata.researchedAt).toLocaleString()}</dd></div>
+                <div><dt>{t("Model")}</dt><dd>{turn.metadata.provider} · {turn.metadata.modelId}</dd></div>
+                <div><dt>{t("Research")}</dt><dd>{turn.metadata.researchPreset} · {turn.metadata.answerDensity}</dd></div>
+                <div><dt>{t("Prompt")}</dt><dd>{turn.metadata.promptVersion}</dd></div>
+                <div><dt>{t("Researched")}</dt><dd>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(turn.metadata.researchedAt)}</dd></div>
               </dl>
             </div>
-            <footer><button type="button" onClick={() => setDeepDiveOpen(false)}>Close and continue</button></footer>
+            <footer><button type="button" onClick={() => setDeepDiveOpen(false)}>{t("Close and continue")}</button></footer>
           </section>
         </div>
       )}
@@ -1107,16 +1127,19 @@ function PerformanceStage({
 
 function AnswerVisual({
   media,
+  outputLocale,
   compact = false,
 }: {
   media: JourneyTurn["media"];
+  outputLocale: JourneyTurn["metadata"]["outputLocale"];
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   const [failedUrls, setFailedUrls] = useState<string[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const thumbnailRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const visible = media
-    .filter((item) => !failedUrls.includes(item.imageUrl) && hasBalancedVisualNotes(item))
+    .filter((item) => !failedUrls.includes(item.imageUrl) && hasBalancedVisualNotes(item, outputLocale))
     .slice(0, compact ? 4 : 8);
   if (!visible.length) return null;
   const activeIndex = Math.min(selectedIndex, visible.length - 1);
@@ -1143,10 +1166,10 @@ function AnswerVisual({
   }
 
   return (
-    <section className={`answer-gallery ${compact ? "compact-visual" : ""}`} aria-label="Visual evidence">
+    <section className={`answer-gallery ${compact ? "compact-visual" : ""}`} aria-label={t("Visual evidence")}>
       <figure className="answer-gallery-selected">
         <div className="answer-gallery-image-stage">
-          <a href={selected.sourcePageUrl} target="_blank" rel="noreferrer" aria-label={`${selected.title ?? selected.caption}. Open source.`}>
+          <a href={selected.sourcePageUrl} target="_blank" rel="noreferrer" aria-label={`${selected.title ?? selected.caption}. ${t("Open")} ${t("Source")}.`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={selected.imageUrl}
@@ -1157,36 +1180,36 @@ function AnswerVisual({
             />
           </a>
           {visible.length > 1 && (
-            <div className="answer-gallery-arrows" aria-label="Browse visual evidence">
-              <button type="button" onClick={() => selectImage(activeIndex - 1)} aria-label="Previous image">
+            <div className="answer-gallery-arrows" aria-label={t("Browse visual evidence")}>
+              <button type="button" onClick={() => selectImage(activeIndex - 1)} aria-label={t("Previous image")}>
                 <ArrowLeft aria-hidden="true" weight="bold" />
               </button>
               <span aria-live="polite">{activeIndex + 1} / {visible.length}</span>
-              <button type="button" onClick={() => selectImage(activeIndex + 1)} aria-label="Next image">
+              <button type="button" onClick={() => selectImage(activeIndex + 1)} aria-label={t("Next image")}>
                 <ArrowRight aria-hidden="true" weight="bold" />
               </button>
             </div>
           )}
         </div>
-        <figcaption><span>{selected.title ?? selected.caption}</span><a href={selected.sourcePageUrl} target="_blank" rel="noreferrer">Source ↗</a></figcaption>
+        <figcaption><span>{selected.title ?? selected.caption}</span><a href={selected.sourcePageUrl} target="_blank" rel="noreferrer">{t("Source")} ↗</a></figcaption>
       </figure>
 
       <aside className="answer-gallery-notes" aria-live="polite">
         <span className="answer-gallery-role">{roleLabel}</span>
         <h3>{selected.title ?? selected.caption}</h3>
-        <div><strong>Why it is here</strong><p>{selected.whyIncluded ?? selected.caption}</p></div>
-        <div><strong>What to notice</strong><ul>{noticeItems.map((item, index) => <li key={`${selected.imageUrl}-notice-${index}`}>{item}</li>)}</ul></div>
-        <div><strong>What it helps explain</strong><p>{selected.learning ?? selected.caption}</p></div>
+        <div><strong>{t("Why it is here")}</strong><p>{selected.whyIncluded ?? selected.caption}</p></div>
+        <div><strong>{t("What to notice")}</strong><ul>{noticeItems.map((item, index) => <li key={`${selected.imageUrl}-notice-${index}`}>{item}</li>)}</ul></div>
+        <div><strong>{t("What it helps explain")}</strong><p>{selected.learning ?? selected.caption}</p></div>
       </aside>
 
-      <div className="answer-gallery-strip" aria-label="Select an image">
+      <div className="answer-gallery-strip" aria-label={t("Select an image")}>
         {visible.map((item, index) => (
           <button
             ref={(node) => { thumbnailRefs.current[index] = node; }}
             type="button"
             className={index === activeIndex ? "selected" : ""}
             key={`${item.imageUrl}-${index}`}
-            aria-label={`Show ${item.title ?? item.caption}`}
+            aria-label={t("Show {title}", { title: item.title ?? item.caption })}
             aria-pressed={index === activeIndex}
             onClick={() => setSelectedIndex(index)}
             onKeyDown={(event) => selectFromKeyboard(index, event)}
@@ -1206,18 +1229,22 @@ function AnswerVisual({
   );
 }
 
-function hasBalancedVisualNotes(item: JourneyTurn["media"][number]) {
-  const wordCount = (value: string) => value.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
+function hasBalancedVisualNotes(item: JourneyTurn["media"][number], locale: JourneyTurn["metadata"]["outputLocale"]) {
+  const wordCount = (value: string) => [...new Intl.Segmenter(locale, { granularity: "word" }).segment(value)].filter((segment) => segment.isWordLike).length;
   const whyCount = wordCount(item.whyIncluded ?? "");
   const learningCount = wordCount(item.learning ?? "");
-  return whyCount >= 18
-    && whyCount <= 26
-    && learningCount >= 18
-    && learningCount <= 26
+  const proseMinimum = locale === "en" ? 18 : 8;
+  const proseMaximum = locale === "en" ? 26 : 40;
+  const noticeMinimum = locale === "en" ? 9 : 4;
+  const noticeMaximum = locale === "en" ? 15 : 25;
+  return whyCount >= proseMinimum
+    && whyCount <= proseMaximum
+    && learningCount >= proseMinimum
+    && learningCount <= proseMaximum
     && item.whatToNotice?.length === 2
     && item.whatToNotice.every((notice) => {
       const count = wordCount(notice);
-      return count >= 9 && count <= 15;
+      return count >= noticeMinimum && count <= noticeMaximum;
     });
 }
 
@@ -1234,6 +1261,7 @@ function JourneyMap({
   onContinue: (id: string) => void;
   onChoose: (turnId: string, optionId: string) => void;
 }) {
+  const { t } = useI18n();
   const activeTurn = journey.turns.find((turn) => turn.id === activeTurnId) ?? journey.turns[0];
   const turnNumber = (turnId: string) => journey.turns.findIndex((turn) => turn.id === turnId) + 1;
   const activePath = useMemo(() => {
@@ -1261,21 +1289,21 @@ function JourneyMap({
     <section className="map-view" aria-labelledby="map-title">
       <header className="map-header">
         <div>
-          <p className="eyebrow"><span /> Your journey</p>
+          <p className="eyebrow"><span /> {t("Your journey")}</p>
           <h1 id="map-title">{journey.title}</h1>
-          <p>Follow the path you took, revisit a turn, or open a question you left behind.</p>
+          <p>{t("Follow the path you took, revisit a turn, or open a question you left behind.")}</p>
         </div>
-        <dl aria-label="Journey overview">
-          <div><dt>Current</dt><dd>{activePath.length} of {journey.turnCount}</dd></div>
-          <div><dt>Open paths</dt><dd>{journey.openBranchCount}</dd></div>
-          <div><dt>Sources</dt><dd>{journey.sourceCount}</dd></div>
+        <dl aria-label={t("Journey overview")}>
+          <div><dt>{t("Current")}</dt><dd>{activePath.length} / {journey.turnCount}</dd></div>
+          <div><dt>{t("Open paths")}</dt><dd>{journey.openBranchCount}</dd></div>
+          <div><dt>{t("Sources")}</dt><dd>{journey.sourceCount}</dd></div>
         </dl>
       </header>
 
       <section className="active-path" aria-labelledby="active-path-title">
         <div className="map-section-heading">
-          <div><span>Active path</span><h2 id="active-path-title">How you got here</h2></div>
-          <p>Choose any turn to see its two directions.</p>
+          <div><span>{t("Active path")}</span><h2 id="active-path-title">{t("How you got here")}</h2></div>
+          <p>{t("Choose any turn to see its two directions.")}</p>
         </div>
         <ol className="active-path-list">
           {activePath.map((turn) => {
@@ -1296,7 +1324,7 @@ function JourneyMap({
                     <strong>{turn.question}</strong>
                   </span>
                   <span className={`path-turn-status ${current ? "current" : "explored"}`}>
-                    {current ? "You are here" : "Explored"}
+                    {t(current ? "You are here" : "Explored")}
                   </span>
                 </button>
               </li>
@@ -1307,16 +1335,16 @@ function JourneyMap({
 
       {selectedIsOffPath && (
         <div className="off-path-notice" role="status">
-          <span>Earlier branch</span>
-          <p>This turn is outside your current path. Exploring an open question here creates a new visible branch.</p>
+          <span>{t("Earlier branch")}</span>
+          <p>{t("This turn is outside your current path. Exploring an open question here creates a new visible branch.")}</p>
         </div>
       )}
 
       <section className="selected-turn-paths" aria-labelledby="selected-paths-title">
         <div className="selected-turn-heading">
           <div>
-            <span>Turn {turnNumber(activeTurn.id)} selected</span>
-            <h2 id="selected-paths-title">Where could this turn go?</h2>
+            <span>{t("Turn {number}", { number: turnNumber(activeTurn.id) })}</span>
+            <h2 id="selected-paths-title">{t("Where could this turn go?")}</h2>
           </div>
         </div>
         <div className="selected-path-grid">
@@ -1329,40 +1357,40 @@ function JourneyMap({
                 key={option.id}
                 onClick={() => onChoose(activeTurn.id, option.id)}
               >
-                <span>Option {option.position === 0 ? "A" : "B"} · open</span>
+                <span>{t("Option")} {option.position === 0 ? "A" : "B"} · {t("Open")}</span>
                 <strong>{option.question}</strong>
-                <small>Explore this question</small>
+                <small>{t("Explore this question")}</small>
               </button>
             ) : (
               <div className={`selected-path-card ${option.state}`} key={option.id}>
-                <span>Option {option.position === 0 ? "A" : "B"} · {option.state === "chosen" ? "path taken" : option.state}</span>
+                <span>{t("Option")} {option.position === 0 ? "A" : "B"} · {t(option.state === "chosen" ? "path taken" : option.state)}</span>
                 <strong>{option.question}</strong>
-                <small>{option.state === "chosen" ? "This answer continues in the map above." : "This direction is no longer active."}</small>
+                <small>{t(option.state === "chosen" ? "This answer continues in the map above." : "This direction is no longer active.")}</small>
               </div>
             );
           })}
         </div>
         <button type="button" className="open-turn-answer" onClick={() => onContinue(activeTurn.id)}>
-          {activeTurn.id === journey.currentTurnId ? "Open full answer" : "Revisit this answer"}
+          {t(activeTurn.id === journey.currentTurnId ? "Open full answer" : "Revisit this answer")}
         </button>
       </section>
 
       {(otherOpenPaths.length > 0 || branchTurns.length > 0) && (
         <details className="other-paths">
           <summary>
-            <span>Other paths</span>
-            <strong>{otherOpenPaths.length} open question{otherOpenPaths.length === 1 ? "" : "s"}{branchTurns.length ? ` · ${branchTurns.length} earlier branch${branchTurns.length === 1 ? "" : "es"}` : ""}</strong>
+            <span>{t("Other paths")}</span>
+            <strong>{t("{count} open questions", { count: otherOpenPaths.length })}{branchTurns.length ? ` · ${t("{count} earlier branches", { count: branchTurns.length })}` : ""}</strong>
           </summary>
           <div className="other-path-groups">
             {branchTurns.map((turn) => (
               <button type="button" className="other-branch-turn" key={turn.id} onClick={() => onSelect(turn.id)}>
-                <span>Earlier branch · turn {turnNumber(turn.id)}</span>
+                <span>{t("Earlier branch")} · {t("Turn {number}", { number: turnNumber(turn.id) })}</span>
                 <strong>{turn.question}</strong>
               </button>
             ))}
             {otherOpenPaths.map(({ option, turn }) => (
               <button type="button" className="other-open-path" key={option.id} onClick={() => onChoose(turn.id, option.id)}>
-                <span>Open from turn {turnNumber(turn.id)} · {turn.topicLabel}</span>
+                <span>{t("Open")} · {t("Turn {number}", { number: turnNumber(turn.id) })} · {turn.topicLabel}</span>
                 <strong>{option.question}</strong>
               </button>
             ))}
@@ -1392,6 +1420,7 @@ function Library({
   onSnapshot: (id: string) => void;
   onNew: () => void;
 }) {
+  const { t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [performerFilter, setPerformerFilter] = useState<PerformerId | "all">("all");
@@ -1404,13 +1433,13 @@ function Library({
   return (
     <section className="library-view" aria-labelledby="library-title">
       <header className="view-heading">
-        <div><p className="eyebrow"><span /> Durable library / D1</p><h1 id="library-title">Questions worth<br /><em>returning to.</em></h1></div>
-        <div><p>{journeys.length} of {viewer?.journeyLimit ?? "—"} journeys saved</p><button type="button" className="compact-action" onClick={onNew}>New drive +</button></div>
+        <div><p className="eyebrow"><span /> {t("Durable library / D1")}</p><h1 id="library-title">{t("Questions worth returning to.")}</h1></div>
+        <div><p>{t("{count} of {limit} journeys saved", { count: journeys.length, limit: viewer?.journeyLimit ?? "—" })}</p><button type="button" className="compact-action" onClick={onNew}>{t("New drive +")}</button></div>
       </header>
-      <div className="library-filters" aria-label="Library filters">
-        <label><span>Search</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title, question, or topic" /></label>
-        <label><span>Performer</span><select value={performerFilter} onChange={(event) => setPerformerFilter(event.target.value as PerformerId | "all")}><option value="all">All performers</option>{PERFORMERS.map((performer) => <option value={performer.id} key={performer.id}>{performer.name}</option>)}</select></label>
-        <label className="check-setting"><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} /><span>Show hidden</span></label>
+      <div className="library-filters" aria-label={t("Library filters")}>
+        <label><span>{t("Search")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Title, question, or topic")} /></label>
+        <label><span>{t("Performer")}</span><select value={performerFilter} onChange={(event) => setPerformerFilter(event.target.value as PerformerId | "all")}><option value="all">{t("All performers")}</option>{PERFORMERS.map((performer) => <option value={performer.id} key={performer.id}>{performer.name}</option>)}</select></label>
+        <label className="check-setting"><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} /><span>{t("Show hidden")}</span></label>
       </div>
       {journeys.length ? (
         <div className="library-grid">
@@ -1418,31 +1447,31 @@ function Library({
             const performer = PERFORMERS.find((item) => item.id === journey.performerId)!;
             return (
               <article key={journey.id} className="library-card">
-                <div className="library-card-top"><span>{journey.pinned ? "PINNED" : String(index + 1).padStart(2, "0")}</span><i className={performer.accent}>{performer.mark}</i></div>
-                <p>{journey.topicLabels.join(" · ") || "unclassified journey"}</p>
+                <div className="library-card-top"><span>{journey.pinned ? t("PINNED") : String(index + 1).padStart(2, "0")}</span><i className={performer.accent}>{performer.mark}</i></div>
+                <p>{journey.topicLabels.join(" · ") || t("unclassified journey")}</p>
                 <h2>{journey.title}</h2>
-                <dl><div><dt>Turns</dt><dd>{journey.turnCount}</dd></div><div><dt>Sources</dt><dd>{journey.sourceCount}</dd></div><div><dt>Open</dt><dd>{journey.openBranchCount}</dd></div></dl>
+                <dl><div><dt>{t("Turns")}</dt><dd>{journey.turnCount}</dd></div><div><dt>{t("Sources")}</dt><dd>{journey.sourceCount}</dd></div><div><dt>{t("Open")}</dt><dd>{journey.openBranchCount}</dd></div></dl>
                 <div className="library-actions">
-                  <button type="button" disabled={busy !== null} onClick={() => onOpen(journey.id)}>Resume <span>↗</span></button>
+                  <button type="button" disabled={busy !== null} onClick={() => onOpen(journey.id)}>{t("Resume")} <span>↗</span></button>
                   {confirmDelete === journey.id ? (
-                    <span className="delete-confirm"><button type="button" disabled={busy !== null} onClick={() => onDelete(journey.id)}>Delete</button><button type="button" onClick={() => setConfirmDelete(null)}>Keep</button></span>
+                    <span className="delete-confirm"><button type="button" disabled={busy !== null} onClick={() => onDelete(journey.id)}>{t("Delete")}</button><button type="button" onClick={() => setConfirmDelete(null)}>{t("Keep")}</button></span>
                   ) : (
-                    <button type="button" className="text-button" onClick={() => setConfirmDelete(journey.id)}>Remove</button>
+                    <button type="button" className="text-button" onClick={() => setConfirmDelete(journey.id)}>{t("Remove")}</button>
                   )}
                 </div>
                 <div className="library-manage">
-                  <button type="button" onClick={() => { const title = window.prompt("Rename this journey", journey.title); if (title) onManage(journey.id, { title }); }}>Rename</button>
-                  <button type="button" onClick={() => onManage(journey.id, { pinned: !journey.pinned })}>{journey.pinned ? "Unpin" : "Pin"}</button>
-                  <button type="button" onClick={() => onManage(journey.id, { hidden: !journey.hidden })}>{journey.hidden ? "Unhide" : "Hide"}</button>
-                  <button type="button" onClick={() => onSnapshot(journey.id)}>Snapshot</button>
-                  <a href={`/api/journeys/${journey.id}/export`}>Export</a>
+                  <button type="button" onClick={() => { const title = window.prompt(t("Rename this journey"), journey.title); if (title) onManage(journey.id, { title }); }}>{t("Rename")}</button>
+                  <button type="button" onClick={() => onManage(journey.id, { pinned: !journey.pinned })}>{t(journey.pinned ? "Unpin" : "Pin")}</button>
+                  <button type="button" onClick={() => onManage(journey.id, { hidden: !journey.hidden })}>{t(journey.hidden ? "Unhide" : "Hide")}</button>
+                  <button type="button" onClick={() => onSnapshot(journey.id)}>{t("Snapshot")}</button>
+                  <a href={`/api/journeys/${journey.id}/export`}>{t("Export")}</a>
                 </div>
               </article>
             );
           })}
         </div>
       ) : (
-        <EmptyStage onOpenLibrary={onNew} label="Start the first saved journey" />
+        <EmptyStage onOpenLibrary={onNew} label={t("Start the first saved journey")} />
       )}
     </section>
   );
@@ -1465,11 +1494,12 @@ function CompareView({
   onCompare: () => void;
   onNew: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <section className="compare-view" aria-labelledby="compare-title">
       <header className="view-heading">
-        <div><p className="eyebrow"><span /> Manual comparison / no provider call</p><h1 id="compare-title">Two journeys.<br /><em>One closer look.</em></h1></div>
-        <div><p>Select two saved journeys. WonderDrive compares their committed paths, topics, and performers.</p></div>
+        <div><p className="eyebrow"><span /> {t("Manual comparison / no provider call")}</p><h1 id="compare-title">{t("Two journeys. One closer look.")}</h1></div>
+        <div><p>{t("Select two saved journeys. WonderDrive compares their committed paths, topics, and performers.")}</p></div>
       </header>
       {journeys.length >= 2 ? (
         <>
@@ -1478,39 +1508,40 @@ function CompareView({
               const chosen = selected.includes(journey.id);
               return (
                 <button type="button" key={journey.id} className={chosen ? "selected" : ""} aria-pressed={chosen} onClick={() => onToggle(journey.id)}>
-                  <span>{String(index + 1).padStart(2, "0")}</span><strong>{journey.title}</strong><small>{journey.turnCount} turns · {journey.topicLabels.join(", ")}</small><i>{chosen ? "✓" : "+"}</i>
+                  <span>{String(index + 1).padStart(2, "0")}</span><strong>{journey.title}</strong><small>{t("{count} turns", { count: journey.turnCount })} · {journey.topicLabels.join(", ")}</small><i>{chosen ? "✓" : "+"}</i>
                 </button>
               );
             })}
           </div>
-          <button className="compare-action" type="button" disabled={selected.length !== 2 || busy} onClick={onCompare}>{busy ? "Reading the paths…" : "Compare selected journeys"} <span>↘</span></button>
+          <button className="compare-action" type="button" disabled={selected.length !== 2 || busy} onClick={onCompare}>{t(busy ? "Reading the paths…" : "Compare selected journeys")} <span>↘</span></button>
           {comparison && <ComparisonReport result={comparison} />}
         </>
       ) : (
-        <div className="compare-empty"><p>Comparison begins after two journeys exist.</p><button type="button" onClick={onNew}>Start another drive →</button></div>
+        <div className="compare-empty"><p>{t("Comparison begins after two journeys exist.")}</p><button type="button" onClick={onNew}>{t("Start another drive")} →</button></div>
       )}
     </section>
   );
 }
 
 function ComparisonReport({ result }: { result: CompareResult }) {
+  const { t, locale } = useI18n();
   return (
     <section className="comparison-report" aria-labelledby="report-title">
-      <div className="report-title"><span>Comparison ready</span><h2 id="report-title">The useful difference</h2></div>
+      <div className="report-title"><span>{t("Comparison ready")}</span><h2 id="report-title">{t("The useful difference")}</h2></div>
       <div className="compare-columns">
         {[result.left, result.right].map((journey, index) => (
           <article key={journey.id}>
-            <span>Path {index === 0 ? "A" : "B"}</span><h3>{journey.title}</h3>
+            <span>{t("Path")} {index === 0 ? "A" : "B"}</span><h3>{journey.title}</h3>
             <p>{journey.performerName} · {journey.modelName} · {journey.researchPreset}</p>
-            <p>{journey.turnCount} turns · {journey.sourceCount} source appearances · {journey.openBranchCount} open branches · ${journey.totalEstimatedCostUsd.toFixed(4)}</p>
-            <p>{journey.actionCount} decisions ({journey.rejectedCount} redraws, {journey.delegatedCount} delegated)</p>
-            <ol>{journey.timeline.map((turn) => <li key={turn.turnId}><strong>{turn.question}</strong><small>{turn.topicLabel} · {new Date(turn.researchedAt).toLocaleDateString()}</small></li>)}</ol>
+            <p>{t("{count} turns", { count: journey.turnCount })} · {t("{count} source appearances", { count: journey.sourceCount })} · {t("{count} open branches", { count: journey.openBranchCount })} · ${journey.totalEstimatedCostUsd.toFixed(4)}</p>
+            <p>{t("{count} decisions", { count: journey.actionCount })} ({t("{count} redraws", { count: journey.rejectedCount })}, {t("{count} delegated", { count: journey.delegatedCount })})</p>
+            <ol>{journey.timeline.map((turn) => <li key={turn.turnId}><strong>{turn.question}</strong><small>{turn.topicLabel} · {new Intl.DateTimeFormat(locale).format(turn.researchedAt)}</small></li>)}</ol>
             <div>{journey.topicLabels.map((topic) => <small key={topic}>{topic}</small>)}</div>
           </article>
         ))}
       </div>
-      <div className="observations"><span>What the saved data shows</span><ul>{result.observations.map((observation) => <li key={observation}>{observation}</li>)}</ul></div>
-      {!!result.confounders.length && <div className="confounders"><span>Comparison cautions</span><ul>{result.confounders.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+      <div className="observations"><span>{t("What the saved data shows")}</span><ul>{result.observations.map((observation, index) => <li key={`${observation.key}-${index}`}>{t(observation.key, observation.values)}</li>)}</ul></div>
+      {!!result.confounders.length && <div className="confounders"><span>{t("Comparison cautions")}</span><ul>{result.confounders.map((item, index) => <li key={`${item.key}-${index}`}>{t(item.key, item.values)}</li>)}</ul></div>}
     </section>
   );
 }
@@ -1526,6 +1557,7 @@ function SettingsView({
   busy: boolean;
   onSave: (next: UserPreferences) => Promise<void>;
 }) {
+  const { t, locale } = useI18n();
   const [draft, setDraft] = useState(preferences);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsReport | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
@@ -1563,48 +1595,49 @@ function SettingsView({
   return (
     <section className="settings-view" aria-labelledby="settings-title">
       <header className="view-heading">
-        <div><p className="eyebrow"><span /> Audience controls</p><h1 id="settings-title">Make the stage<br /><em>comfortable.</em></h1></div>
-        <div><p>{viewer?.mode === "chatgpt" ? "Synced to your ChatGPT identity" : "Saved to this guest session"}</p><span>These preferences change presentation and future turns, never evidence.</span></div>
+        <div><p className="eyebrow"><span /> {t("Audience controls")}</p><h1 id="settings-title">{t("Make the stage comfortable.")}</h1></div>
+        <div><p>{t(viewer?.mode === "chatgpt" ? "Synced to your ChatGPT identity" : "Saved to this guest session")}</p><span>{t("These preferences change presentation and future turns, never evidence.")}</span></div>
       </header>
       <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void onSave(draft); }}>
-        <label><span>Default answer density</span><select value={draft.answerDensity} onChange={(event) => setDraft({ ...draft, answerDensity: event.target.value as AnswerDensity })}><option value="brief">Brief</option><option value="balanced">Balanced</option><option value="rich">Rich</option></select><small>Separate from how deeply WonderDrive researches.</small></label>
-        <label><span>Text size</span><select value={draft.textSize} onChange={(event) => setDraft({ ...draft, textSize: event.target.value as TextSize })}><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option><option value="xl">Extra large</option></select></label>
-        <label><span>Factual images</span><select value={draft.imagePreference} onChange={(event) => setDraft({ ...draft, imagePreference: event.target.value as ImagePreference })}><option value="avoid">Avoid</option><option value="when-useful">When useful</option><option value="prefer">Prefer when supported</option></select><small>Decorative imagery is never substituted for factual media.</small></label>
-        <label><span>Read-aloud speed: {draft.speechRate.toFixed(1)}×</span><input type="range" min="0.6" max="1.6" step="0.1" value={draft.speechRate} onChange={(event) => setDraft({ ...draft, speechRate: Number(event.target.value) })} /></label>
-        <label className="check-setting"><input type="checkbox" checked={draft.reduceMotion} onChange={(event) => setDraft({ ...draft, reduceMotion: event.target.checked })} /><span>Reduce interface motion</span></label>
-        <button className="launch-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Save preferences"}<i aria-hidden="true">↘</i></button>
+        <label className="language-setting"><span>{t("Experience language")}</span><select value={draft.interfaceLocale} onChange={(event) => { const interfaceLocale = event.target.value as UserPreferences["interfaceLocale"]; const next = { ...draft, interfaceLocale, defaultOutputLocale: interfaceLocale }; setDraft(next); void onSave(next); }}>{SUPPORTED_LOCALES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select><small>{t("Changes the whole interface and future learning output.")}</small></label>
+        <label><span>{t("Default answer density")}</span><select value={draft.answerDensity} onChange={(event) => setDraft({ ...draft, answerDensity: event.target.value as AnswerDensity })}><option value="brief">{t("Brief")}</option><option value="balanced">{t("Balanced")}</option><option value="rich">{t("Rich")}</option></select><small>{t("Separate from how deeply WonderDrive researches.")}</small></label>
+        <label><span>{t("Text size")}</span><select value={draft.textSize} onChange={(event) => setDraft({ ...draft, textSize: event.target.value as TextSize })}><option value="s">{t("Small")}</option><option value="m">{t("Medium")}</option><option value="l">{t("Large")}</option><option value="xl">{t("Extra large")}</option></select></label>
+        <label><span>{t("Factual images")}</span><select value={draft.imagePreference} onChange={(event) => setDraft({ ...draft, imagePreference: event.target.value as ImagePreference })}><option value="avoid">{t("Avoid")}</option><option value="when-useful">{t("When useful")}</option><option value="prefer">{t("Prefer when supported")}</option></select><small>{t("Decorative imagery is never substituted for factual media.")}</small></label>
+        <label><span>{t("Read-aloud speed: {rate}×", { rate: draft.speechRate.toFixed(1) })}</span><input type="range" min="0.6" max="1.6" step="0.1" value={draft.speechRate} onChange={(event) => setDraft({ ...draft, speechRate: Number(event.target.value) })} /></label>
+        <label className="check-setting"><input type="checkbox" checked={draft.reduceMotion} onChange={(event) => setDraft({ ...draft, reduceMotion: event.target.checked })} /><span>{t("Reduce interface motion")}</span></label>
+        <button className="launch-button" type="submit" disabled={busy}>{t(busy ? "Saving…" : "Save preferences")}<i aria-hidden="true">↘</i></button>
       </form>
       <section className="diagnostics-console" aria-labelledby="diagnostics-title">
         <header>
           <div>
-            <p className="eyebrow"><span /> Private diagnostics</p>
-            <h2 id="diagnostics-title">What failed, where, and when.</h2>
+            <p className="eyebrow"><span /> {t("Private diagnostics")}</p>
+            <h2 id="diagnostics-title">{t("What failed, where, and when.")}</h2>
           </div>
           {viewer?.mode === "chatgpt" && (
             <button type="button" disabled={diagnosticsLoading} onClick={() => void refreshDiagnostics()}>
-              {diagnosticsLoading ? "Checking…" : "Refresh incidents"}
+              {t(diagnosticsLoading ? "Checking…" : "Refresh incidents")}
             </button>
           )}
         </header>
         {viewer?.mode !== "chatgpt" ? (
-          <p className="diagnostics-empty">Sign in with ChatGPT to keep private, identity-scoped diagnostic history.</p>
+          <p className="diagnostics-empty">{t("Sign in with ChatGPT to keep private, identity-scoped diagnostic history.")}</p>
         ) : diagnosticsError ? (
           <p className="diagnostics-empty" role="alert">{diagnosticsError}</p>
         ) : !diagnostics ? (
-          <p className="diagnostics-empty">Loading privacy-safe request health…</p>
+          <p className="diagnostics-empty">{t("Loading privacy-safe request health…")}</p>
         ) : (
           <>
             <div className="diagnostics-summary">
-              <div><strong>{diagnostics.summary.requests24h}</strong><span>requests · 24h</span></div>
-              <div><strong>{diagnostics.summary.failures24h}</strong><span>failures · 24h</span></div>
-              <div><strong>{Math.round(diagnostics.summary.failureRate24h * 100)}%</strong><span>failure rate</span></div>
-              <div><strong>{diagnostics.retentionDays}d</strong><span>retention</span></div>
+              <div><strong>{diagnostics.summary.requests24h}</strong><span>{t("requests · 24h")}</span></div>
+              <div><strong>{diagnostics.summary.failures24h}</strong><span>{t("failures · 24h")}</span></div>
+              <div><strong>{Math.round(diagnostics.summary.failureRate24h * 100)}%</strong><span>{t("failure rate")}</span></div>
+              <div><strong>{diagnostics.retentionDays}d</strong><span>{t("retention")}</span></div>
             </div>
             {!!diagnostics.repeatedFailures.length && (
               <div className="diagnostics-alert" role="status">
-                <strong>Repeated failure detected</strong>
+                <strong>{t("Repeated failure detected")}</strong>
                 {diagnostics.repeatedFailures.map((item) => (
-                  <span key={item.errorCode}>{item.errorCode} happened {item.count} times in ten minutes.</span>
+                  <span key={item.errorCode}>{t("{code} happened {count} times in ten minutes.", { code: item.errorCode, count: item.count })}</span>
                 ))}
               </div>
             )}
@@ -1615,25 +1648,25 @@ function SettingsView({
                     <code>{formatDiagnosticId(incident.diagnosticId)}</code>
                     <strong>{incident.errorCode}</strong>
                     <span>{incident.modelId}</span>
-                    <time dateTime={new Date(incident.createdAt).toISOString()}>{new Date(incident.createdAt).toLocaleString()}</time>
+                    <time dateTime={new Date(incident.createdAt).toISOString()}>{new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(incident.createdAt)}</time>
                   </summary>
                   <dl>
-                    <div><dt>Stage</dt><dd>{incident.stage}</dd></div>
-                    <div><dt>Last provider event</dt><dd>{incident.lastProviderEventType}</dd></div>
-                    <div><dt>Parsed events</dt><dd>{incident.providerEventCount}</dd></div>
-                    <div><dt>Malformed events</dt><dd>{incident.malformedEventCount}</dd></div>
-                    <div><dt>Output deltas</dt><dd>{incident.outputDeltaCount}</dd></div>
-                    <div><dt>Provider done marker</dt><dd>{incident.sawProviderDone ? "seen" : "not seen"}</dd></div>
-                    <div><dt>Latency</dt><dd>{incident.latencyMs ? `${(incident.latencyMs / 1000).toFixed(1)}s` : "unrecorded"}</dd></div>
-                    <div><dt>HTTP status</dt><dd>{incident.httpStatus ?? "unrecorded"}</dd></div>
-                    <div><dt>OpenAI request</dt><dd>{incident.providerRequestId ?? "unrecorded"}</dd></div>
-                    <div><dt>Preset</dt><dd>{incident.researchPreset}</dd></div>
+                    <div><dt>{t("Stage")}</dt><dd>{incident.stage}</dd></div>
+                    <div><dt>{t("Last provider event")}</dt><dd>{incident.lastProviderEventType}</dd></div>
+                    <div><dt>{t("Parsed events")}</dt><dd>{incident.providerEventCount}</dd></div>
+                    <div><dt>{t("Malformed events")}</dt><dd>{incident.malformedEventCount}</dd></div>
+                    <div><dt>{t("Output deltas")}</dt><dd>{incident.outputDeltaCount}</dd></div>
+                    <div><dt>{t("Provider done marker")}</dt><dd>{t(incident.sawProviderDone ? "seen" : "not seen")}</dd></div>
+                    <div><dt>{t("Latency")}</dt><dd>{incident.latencyMs ? `${(incident.latencyMs / 1000).toFixed(1)}s` : t("unrecorded")}</dd></div>
+                    <div><dt>{t("HTTP status")}</dt><dd>{incident.httpStatus ?? t("unrecorded")}</dd></div>
+                    <div><dt>{t("OpenAI request")}</dt><dd>{incident.providerRequestId ?? t("unrecorded")}</dd></div>
+                    <div><dt>{t("Preset")}</dt><dd>{incident.researchPreset}</dd></div>
                   </dl>
                   <p>{incident.errorMessage}</p>
                 </details>
-              )) : <p className="diagnostics-empty">No failed research requests in the retained window.</p>}
+              )) : <p className="diagnostics-empty">{t("No failed research requests in the retained window.")}</p>}
             </div>
-            <p className="diagnostics-privacy">Prompts, answers, API keys, cookies, and source contents are never included.</p>
+            <p className="diagnostics-privacy">{t("Prompts, answers, API keys, cookies, and source contents are never included.")}</p>
           </>
         )}
       </section>
@@ -1642,11 +1675,13 @@ function SettingsView({
 }
 
 function LoadingStage() {
-  return <section className="loading-stage" aria-live="polite"><span className="loading-orbit" /><p>Opening your WonderDrive library…</p><small>Resolving a durable guest identity</small></section>;
+  const { t } = useI18n();
+  return <section className="loading-stage" aria-live="polite"><span className="loading-orbit" /><p>{t("Opening your WonderDrive library…")}</p><small>{t("Resolving a durable guest identity")}</small></section>;
 }
 
 function EmptyStage({ onOpenLibrary, label = "Open the journey library" }: { onOpenLibrary: () => void; label?: string }) {
-  return <section className="empty-stage"><span aria-hidden="true">?</span><h1>No journey is on stage.</h1><p>Start a new question or return to one you have already saved.</p><button type="button" onClick={onOpenLibrary}>{label} →</button></section>;
+  const { t } = useI18n();
+  return <section className="empty-stage"><span aria-hidden="true">?</span><h1>{t("No journey is on stage.")}</h1><p>{t("Start a new question or return to one you have already saved.")}</p><button type="button" onClick={onOpenLibrary}>{t(label)} →</button></section>;
 }
 
 function upsertSummary(current: JourneySummary[], detail: JourneyDetail): JourneySummary[] {
@@ -1659,6 +1694,7 @@ function upsertSummary(current: JourneySummary[], detail: JourneyDetail): Journe
     researchPreset: detail.researchPreset,
     answerDensity: detail.answerDensity,
     imagePreference: detail.imagePreference,
+    outputLocale: detail.outputLocale,
     currentTurnId: detail.currentTurnId,
     turnCount: detail.turnCount,
     sourceCount: detail.sourceCount,

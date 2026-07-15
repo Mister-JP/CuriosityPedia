@@ -8,9 +8,12 @@ import { getD1 } from "../db";
 import { getJourney } from "./repository";
 import { RepositoryError } from "./errors";
 import { asRecord } from "./request";
+import { normalizeLocale } from "./i18n";
 import type { ViewerContext } from "./viewer";
 
 type PreferencesRow = {
+  interface_locale: UserPreferences["interfaceLocale"];
+  default_output_locale: UserPreferences["defaultOutputLocale"];
   answer_density: UserPreferences["answerDensity"];
   text_size: UserPreferences["textSize"];
   image_preference: UserPreferences["imagePreference"];
@@ -21,13 +24,16 @@ type PreferencesRow = {
 export async function getPreferences(viewer: ViewerContext): Promise<UserPreferences> {
   const row = await getD1()
     .prepare(
-      `SELECT answer_density, text_size, image_preference, speech_rate_percent, reduce_motion
+      `SELECT interface_locale, default_output_locale, answer_density, text_size,
+              image_preference, speech_rate_percent, reduce_motion
        FROM preferences WHERE identity_id = ? LIMIT 1`,
     )
     .bind(viewer.identityId)
     .first<PreferencesRow>();
   return row
-    ? {
+      ? {
+        interfaceLocale: row.interface_locale,
+        defaultOutputLocale: row.default_output_locale,
         answerDensity: row.answer_density,
         textSize: row.text_size,
         imagePreference: row.image_preference,
@@ -45,10 +51,12 @@ export async function updatePreferences(
   await getD1()
     .prepare(
       `INSERT INTO preferences
-        (identity_id, answer_density, text_size, image_preference, speech_rate_percent,
-         reduce_motion, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+        (identity_id, interface_locale, default_output_locale, answer_density, text_size,
+         image_preference, speech_rate_percent, reduce_motion, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(identity_id) DO UPDATE SET
+         interface_locale = excluded.interface_locale,
+         default_output_locale = excluded.default_output_locale,
          answer_density = excluded.answer_density,
          text_size = excluded.text_size,
          image_preference = excluded.image_preference,
@@ -58,6 +66,8 @@ export async function updatePreferences(
     )
     .bind(
       viewer.identityId,
+      preferences.interfaceLocale,
+      preferences.defaultOutputLocale,
       preferences.answerDensity,
       preferences.textSize,
       preferences.imagePreference,
@@ -232,6 +242,8 @@ export async function getResearchStatus(viewer: ViewerContext, requestId: string
 
 function validatePreferences(value: unknown): UserPreferences {
   const body = asRecord(value);
+  const interfaceLocale = normalizeLocale(body.interfaceLocale, "interface language");
+  const defaultOutputLocale = normalizeLocale(body.defaultOutputLocale, "learning language");
   const answerDensity = body.answerDensity;
   const textSize = body.textSize;
   const imagePreference = body.imagePreference;
@@ -253,6 +265,8 @@ function validatePreferences(value: unknown): UserPreferences {
     throw new RepositoryError("BAD_REQUEST", "Reduced motion must be true or false.", 400);
   }
   return {
+    interfaceLocale,
+    defaultOutputLocale,
     answerDensity: answerDensity as UserPreferences["answerDensity"],
     textSize: textSize as UserPreferences["textSize"],
     imagePreference: imagePreference as UserPreferences["imagePreference"],

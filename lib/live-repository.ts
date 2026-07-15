@@ -25,6 +25,7 @@ import {
   titleFromSeed,
 } from "./request";
 import { optionStatements } from "./turn-options";
+import { normalizeLocale } from "./i18n";
 
 const PRESETS: ResearchPreset[] = ["spark", "standard", "deep"];
 
@@ -158,6 +159,7 @@ export async function prepareLiveResearch(
     researchPreset: normalized.researchPreset,
     answerDensity: normalized.answerDensity,
     imagePreference: normalized.imagePreference,
+    outputLocale: normalized.outputLocale,
     topicTrail: [...normalized.topicTrail],
     journeyId: normalized.journeyId,
     fromTurnId: normalized.fromTurnId,
@@ -246,10 +248,10 @@ async function commitLiveCreate(
       .prepare(
         `INSERT INTO journeys
           (id, owner_identity_id, seed, title, performer_id, model_id, research_preset,
-           answer_density, image_preference, current_turn_id, turn_count, source_count,
+           answer_density, image_preference, output_locale, current_turn_id, turn_count, source_count,
            last_action, status, version,
            created_at, updated_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'created', 'active', 1, ?, ?
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'created', 'active', 1, ?, ?
          WHERE EXISTS (
            SELECT 1 FROM research_requests
            WHERE id = ? AND identity_id = ? AND status = 'researching'
@@ -265,6 +267,7 @@ async function commitLiveCreate(
         prepared.researchPreset,
         prepared.answerDensity,
         prepared.imagePreference,
+        prepared.outputLocale,
         turnId,
         draft.sources.length,
         now,
@@ -278,9 +281,9 @@ async function commitLiveCreate(
           (id, journey_id, parent_turn_id, depth, question, status, answer, answer_json,
            transition, topic_label, research_summary, research_handoff_json, preferred_position,
            fixture_key, option_set_version, provider, model_id, prompt_version, performer_version,
-           model_snapshot, answer_density, image_preference, created_at, ready_at)
+           model_snapshot, answer_density, image_preference, output_locale, created_at, ready_at)
          SELECT ?, ?, NULL, 0, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, NULL, 0,
-                'openai', ?, ?, ?, ?, ?, ?, ?, ?
+                'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?)`,
       )
       .bind(
@@ -300,6 +303,7 @@ async function commitLiveCreate(
         modelById(prepared.modelId).snapshot,
         prepared.answerDensity,
         prepared.imagePreference,
+        prepared.outputLocale,
         now,
         now,
         journeyId,
@@ -408,9 +412,9 @@ async function commitLiveAdvance(
           (id, journey_id, parent_turn_id, depth, question, status, answer, answer_json,
            transition, topic_label, research_summary, research_handoff_json, preferred_position,
            fixture_key, option_set_version, provider, model_id, prompt_version, performer_version,
-           model_snapshot, answer_density, image_preference, created_at, ready_at)
+           model_snapshot, answer_density, image_preference, output_locale, created_at, ready_at)
          SELECT ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, NULL, 0,
-                'openai', ?, ?, ?, ?, ?, ?, ?, ?
+                'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
            AND version = ? AND deleted_at IS NULL)`,
       )
@@ -433,6 +437,7 @@ async function commitLiveAdvance(
         modelById(prepared.modelId).snapshot,
         prepared.answerDensity,
         prepared.imagePreference,
+        prepared.outputLocale,
         now,
         now,
         journeyId,
@@ -782,6 +787,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
     if (!["avoid", "when-useful", "prefer"].includes(request.imagePreference)) {
       throw new RepositoryError("BAD_REQUEST", "Choose a supported factual-image preference.", 400);
     }
+    const outputLocale = normalizeLocale(request.outputLocale, "learning language");
     const count = await getD1()
       .prepare(
         "SELECT COUNT(*) AS count FROM journeys WHERE owner_identity_id = ? AND deleted_at IS NULL",
@@ -804,6 +810,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
         researchPreset: request.researchPreset,
         answerDensity: request.answerDensity,
         imagePreference: request.imagePreference,
+        outputLocale,
       },
       question: seed,
       seed,
@@ -813,6 +820,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
       researchPreset: request.researchPreset,
       answerDensity: request.answerDensity,
       imagePreference: request.imagePreference,
+      outputLocale,
       topicTrail: [],
       journeyId: undefined,
       fromTurnId: undefined,
@@ -880,6 +888,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
     researchPreset: journey.researchPreset,
     answerDensity: journey.answerDensity,
     imagePreference: journey.imagePreference,
+    outputLocale: journey.outputLocale,
     topicTrail,
     journeyId: journey.id,
     fromTurnId: fromTurn.id,

@@ -3,6 +3,7 @@ import type { JourneyTurn, ModelId, PerformerId } from "./contracts";
 import { RepositoryError } from "./errors";
 import { isRecord, outputText, requestOpenAI, structuredOutput } from "./openai";
 import { recordOpenAIUsage } from "./provider-usage";
+import { localeName } from "./i18n";
 
 type RedrawResult = {
   preferredPosition: 0 | 1;
@@ -56,6 +57,7 @@ export async function runLiveRedraw(input: {
         "Write each question as a doorway for a curious beginner of any age who may be encountering the subject for the first time. They should not know the answer, but should immediately understand what the question is asking. Do not reuse specialist terms from the answer unless their meaning is obvious from the question.",
         "Make each one a playable rabbit hole: 5–12 words, plain everyday language, one idea at a time, and fun to say out loud. Ask about something the learner can picture: what it does, why it happens, how it works, what might happen if it changed, or what it can be compared with.",
         "Prefer concrete wonder, odd comparisons, hidden abilities, vivid cause-and-effect, and small mysteries. Avoid academic framing, jargon, stacked clauses, vague abstraction, and quiz-like recall.",
+        `Write both questions and angle labels in ${localeName(input.turn.metadata.outputLocale)} (${input.turn.metadata.outputLocale}).`,
         "Do not research, answer the questions, or mention this instruction. Return the required structured output only.",
       ].join("\n"),
       input: JSON.stringify({

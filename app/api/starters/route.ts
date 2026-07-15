@@ -2,6 +2,7 @@ import { query } from "../../../lib/api";
 import { PERFORMERS } from "../../../lib/catalog";
 import type { PerformerId } from "../../../lib/contracts";
 import { getPersonalizedStarters } from "../../../lib/starter-recommendations";
+import { getPreferences } from "../../../lib/product-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +13,13 @@ export async function GET(request: Request) {
     ? requested as PerformerId
     : "sage";
   const refresh = searchParams.get("refresh") === "1";
-  return query(async (viewer) => ({ starters: await getPersonalizedStarters(viewer, performerId, { refresh }) }));
+  return query(async (viewer) => {
+    const preferences = await getPreferences(viewer);
+    return {
+      starters: await getPersonalizedStarters(viewer, performerId, {
+        refresh,
+        outputLocale: preferences.defaultOutputLocale,
+      }),
+    };
+  });
 }

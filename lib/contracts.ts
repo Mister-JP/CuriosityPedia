@@ -11,8 +11,11 @@ export type ResearchPreset = "spark" | "standard" | "deep";
 export type AnswerDensity = "brief" | "balanced" | "rich";
 export type TextSize = "s" | "m" | "l" | "xl";
 export type ImagePreference = "avoid" | "when-useful" | "prefer";
+export type SupportedLocale = "en" | "es";
 
 export type UserPreferences = {
+  interfaceLocale: SupportedLocale;
+  defaultOutputLocale: SupportedLocale;
   answerDensity: AnswerDensity;
   textSize: TextSize;
   imagePreference: ImagePreference;
@@ -185,6 +188,7 @@ export type JourneyTurn = {
     researchPreset: ResearchPreset;
     answerDensity: AnswerDensity;
     imagePreference: ImagePreference;
+    outputLocale: SupportedLocale;
     promptVersion: string;
     researchedAt: number;
   };
@@ -216,6 +220,7 @@ export type JourneySummary = {
   researchPreset: ResearchPreset;
   answerDensity: AnswerDensity;
   imagePreference: ImagePreference;
+  outputLocale: SupportedLocale;
   currentTurnId: string;
   turnCount: number;
   sourceCount: number;
@@ -249,6 +254,7 @@ export type CreateJourneyRequest = {
   researchPreset: ResearchPreset;
   answerDensity: AnswerDensity;
   imagePreference: ImagePreference;
+  outputLocale: SupportedLocale;
   idempotencyKey: string;
 };
 
@@ -272,6 +278,7 @@ export type LiveResearchRequest =
       researchPreset: ResearchPreset;
       answerDensity: AnswerDensity;
       imagePreference: ImagePreference;
+      outputLocale: SupportedLocale;
       idempotencyKey: string;
     }
   | {
@@ -316,8 +323,13 @@ export type CompareResult = {
   sharedTopics: string[];
   leftOnlyTopics: string[];
   rightOnlyTopics: string[];
-  observations: string[];
-  confounders: string[];
+  observations: LocalizedMessage[];
+  confounders: LocalizedMessage[];
+};
+
+export type LocalizedMessage = {
+  key: string;
+  values?: Record<string, string | number>;
 };
 
 export type ApiSuccess<T> = { data: T; viewer: Viewer };

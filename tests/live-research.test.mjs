@@ -234,6 +234,7 @@ test("sends only the ordered topic trail as prior-content context", () => {
     researchPreset: "standard",
     answerDensity: "balanced",
     imagePreference: "when-useful",
+    outputLocale: "es",
     topicTrail: ["radio spectrum", "frequency hopping"],
     rejectedQuestions: ["Who invented Bluetooth?"],
     seed: "PRIVATE STARTING QUESTION",
@@ -243,6 +244,7 @@ test("sends only the ordered topic trail as prior-content context", () => {
 
   assert.match(input, /1\. radio spectrum\n2\. frequency hopping/);
   assert.match(input, /Question to research now: How does Bluetooth hopping avoid interference\?/);
+  assert.match(input, /Reader output language: Español \(es\)\./);
   assert.match(input, /not evidence of the learner's knowledge or proficiency/);
   assert.doesNotMatch(input, /Who invented Bluetooth\?|PRIVATE STARTING QUESTION|PRIVATE OLD ANSWER|PRIVATE OLD SOURCE/);
 });
@@ -264,6 +266,8 @@ test("prompts research for source fitness, beginner clarity, and intentional vis
   assert.match(instructions, /first decide what the learner would benefit from seeing/);
   assert.match(instructions, /doorway for a curious beginner of any age/);
   assert.match(instructions, /Research posture: Search for first-party descriptions and measured evidence/);
+  assert.match(instructions, /Research and select sources in whichever languages provide the strongest evidence/);
+  assert.match(instructions, /Write every reader-facing natural-language field in that output language/);
 });
 
 test("repairs citation pointers with source IDs without rewriting prose", () => {

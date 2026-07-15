@@ -31,6 +31,7 @@ import {
   titleFromSeed,
 } from "./request";
 import { optionStatements } from "./turn-options";
+import { normalizeLocale } from "./i18n";
 
 type JourneyRow = {
   id: string;
@@ -41,6 +42,7 @@ type JourneyRow = {
   research_preset: ResearchPreset;
   answer_density: JourneySummary["answerDensity"];
   image_preference: JourneySummary["imagePreference"];
+  output_locale: JourneySummary["outputLocale"];
   pinned: number;
   hidden: number;
   current_turn_id: string;
@@ -73,6 +75,7 @@ type TurnRow = {
   model_snapshot: string | null;
   turn_answer_density: JourneySummary["answerDensity"] | null;
   turn_image_preference: JourneySummary["imagePreference"] | null;
+  turn_output_locale: JourneySummary["outputLocale"] | null;
   provider_response_id: string | null;
   input_tokens: number;
   cached_input_tokens: number;
@@ -155,6 +158,7 @@ export async function createJourney(
     researchPreset: request.researchPreset,
     answerDensity: request.answerDensity,
     imagePreference: request.imagePreference,
+    outputLocale: request.outputLocale,
   });
   const prior = await db
     .prepare(
@@ -203,9 +207,9 @@ export async function createJourney(
       .prepare(
         `INSERT INTO journeys
           (id, owner_identity_id, seed, title, performer_id, model_id, research_preset,
-           answer_density, image_preference, current_turn_id, turn_count, source_count,
+           answer_density, image_preference, output_locale, current_turn_id, turn_count, source_count,
            last_action, status, version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'created', 'active', 1, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'created', 'active', 1, ?, ?)`,
       )
       .bind(
         journeyId,
@@ -217,6 +221,7 @@ export async function createJourney(
         request.researchPreset,
         request.answerDensity,
         request.imagePreference,
+        request.outputLocale,
         turnId,
         draft.sources.length,
         now,
@@ -228,8 +233,8 @@ export async function createJourney(
           (id, journey_id, parent_turn_id, depth, question, status, answer, answer_json,
            transition, topic_label, research_summary, research_handoff_json, preferred_position,
            fixture_key, option_set_version, provider, model_id, prompt_version,
-           performer_version, model_snapshot, answer_density, image_preference, created_at, ready_at)
-         VALUES (?, ?, NULL, 0, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'fixture', ?, ?, ?, ?, ?, ?, ?, ?)`,
+           performer_version, model_snapshot, answer_density, image_preference, output_locale, created_at, ready_at)
+         VALUES (?, ?, NULL, 0, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'fixture', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         turnId,
@@ -249,6 +254,7 @@ export async function createJourney(
         modelById(request.modelId).snapshot,
         request.answerDensity,
         request.imagePreference,
+        request.outputLocale,
         now,
         now,
       ),
@@ -294,7 +300,7 @@ export async function listJourneys(viewer: ViewerContext): Promise<JourneySummar
   const journeys = await db
     .prepare(
       `SELECT id, seed, title, performer_id, model_id, research_preset, answer_density,
-              image_preference, pinned, hidden, current_turn_id, turn_count, source_count,
+              image_preference, output_locale, pinned, hidden, current_turn_id, turn_count, source_count,
               status, version, updated_at,
               (SELECT COUNT(*) FROM turn_options o JOIN turns t ON t.id = o.turn_id
                WHERE t.journey_id = journeys.id AND o.state = 'proposed') AS open_branch_count
@@ -333,7 +339,7 @@ export async function getJourney(
   const journey = await db
     .prepare(
       `SELECT id, seed, title, performer_id, model_id, research_preset, answer_density,
-              image_preference, pinned, hidden, current_turn_id, turn_count, source_count,
+              image_preference, output_locale, pinned, hidden, current_turn_id, turn_count, source_count,
               status, version, updated_at,
               (SELECT COUNT(*) FROM turn_options o JOIN turns t ON t.id = o.turn_id
                WHERE t.journey_id = journeys.id AND o.state = 'proposed') AS open_branch_count
@@ -355,7 +361,8 @@ export async function getJourney(
                   t.provider AS turn_provider, t.model_id AS turn_model_id,
                   t.prompt_version, t.performer_version, t.model_snapshot,
                   t.answer_density AS turn_answer_density,
-                  t.image_preference AS turn_image_preference, r.provider AS run_provider,
+                  t.image_preference AS turn_image_preference,
+                  t.output_locale AS turn_output_locale, r.provider AS run_provider,
                   r.provider_response_id, COALESCE(r.input_tokens, 0) AS input_tokens,
                   COALESCE(r.cached_input_tokens, 0) AS cached_input_tokens,
                   COALESCE(r.output_tokens, 0) AS output_tokens,
@@ -485,6 +492,7 @@ export async function getJourney(
         researchPreset: journey.research_preset,
         answerDensity: turn.turn_answer_density ?? journey.answer_density,
         imagePreference: turn.turn_image_preference ?? journey.image_preference,
+        outputLocale: turn.turn_output_locale ?? journey.output_locale,
         promptVersion: turn.prompt_version ?? PROMPT_VERSION,
         researchedAt: turn.created_at,
       },
@@ -748,8 +756,8 @@ export async function advanceJourney(
           (id, journey_id, parent_turn_id, depth, question, status, answer, answer_json,
            transition, topic_label, research_summary, research_handoff_json, preferred_position,
            fixture_key, option_set_version, provider, model_id, prompt_version, performer_version,
-           model_snapshot, answer_density, image_preference, created_at, ready_at)
-         SELECT ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'fixture', ?, ?, ?, ?, ?, ?, ?, ?
+           model_snapshot, answer_density, image_preference, output_locale, created_at, ready_at)
+         SELECT ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'fixture', ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ? AND version = ? AND deleted_at IS NULL)`,
       )
       .bind(
@@ -772,6 +780,7 @@ export async function advanceJourney(
         modelById(journey.modelId).snapshot,
         journey.answerDensity,
         journey.imagePreference,
+        journey.outputLocale,
         now,
         now,
         journeyId,
@@ -934,16 +943,16 @@ export async function compareJourneys(
   const sharedTopics = leftSummary.topicLabels.filter((topic) => rightSummary.topicLabels.includes(topic));
   const leftOnlyTopics = leftSummary.topicLabels.filter((topic) => !rightSummary.topicLabels.includes(topic));
   const rightOnlyTopics = rightSummary.topicLabels.filter((topic) => !leftSummary.topicLabels.includes(topic));
-  const observations = [
+  const observations: CompareResult["observations"] = [
     sharedTopics.length
-      ? `Both journeys touched ${formatList(sharedTopics)}.`
-      : "The journeys did not land on the same fixture topic.",
+      ? { key: "Both journeys touched {topics}.", values: { topics: formatList(sharedTopics) } }
+      : { key: "The journeys did not land on the same fixture topic." },
     left.performerId === right.performerId
-      ? "They used the same performer, so the path—not the persona—is the clearest visible difference."
-      : "They used different performers, so both path and persona shape the contrast.",
+      ? { key: "They used the same performer, so the path—not the persona—is the clearest visible difference." }
+      : { key: "They used different performers, so both path and persona shape the contrast." },
     left.turnCount === right.turnCount
-      ? `Both contain ${left.turnCount} committed ${left.turnCount === 1 ? "turn" : "turns"}.`
-      : `${left.title} contains ${left.turnCount} turns; ${right.title} contains ${right.turnCount}.`,
+      ? { key: left.turnCount === 1 ? "Both contain 1 committed turn." : "Both contain {count} committed turns.", values: { count: left.turnCount } }
+      : { key: "{leftTitle} contains {leftCount} turns; {rightTitle} contains {rightCount}.", values: { leftTitle: left.title, leftCount: left.turnCount, rightTitle: right.title, rightCount: right.turnCount } },
   ];
   return {
     left,
@@ -953,10 +962,10 @@ export async function compareJourneys(
     rightOnlyTopics,
     observations,
     confounders: [
-      "Live-web evidence can change between research dates.",
-      "Audience choices and rejected paths change the context of later turns.",
-      "Model output is stochastic; this view is descriptive, not a winner ranking.",
-      left.seed === right.seed ? "Both journeys began from the same seed." : "The starting seeds differ.",
+      { key: "Live-web evidence can change between research dates." },
+      { key: "Audience choices and rejected paths change the context of later turns." },
+      { key: "Model output is stochastic; this view is descriptive, not a winner ranking." },
+      { key: left.seed === right.seed ? "Both journeys began from the same seed." : "The starting seeds differ." },
     ],
   };
 }
@@ -1120,6 +1129,7 @@ function summaryFromRow(row: JourneyRow, topicLabels: string[]): JourneySummary 
     researchPreset: row.research_preset,
     answerDensity: row.answer_density,
     imagePreference: row.image_preference,
+    outputLocale: row.output_locale,
     currentTurnId: row.current_turn_id,
     turnCount: row.turn_count,
     sourceCount: row.source_count,
@@ -1142,6 +1152,7 @@ function summaryFromDetail(detail: JourneyDetail): JourneySummary {
     researchPreset: detail.researchPreset,
     answerDensity: detail.answerDensity,
     imagePreference: detail.imagePreference,
+    outputLocale: detail.outputLocale,
     currentTurnId: detail.currentTurnId,
     turnCount: detail.turnCount,
     sourceCount: detail.sourceCount,
@@ -1245,6 +1256,7 @@ function validateCreateRequest(request: CreateJourneyRequest) {
   if (!["avoid", "when-useful", "prefer"].includes(request.imagePreference)) {
     throw new RepositoryError("BAD_REQUEST", "Choose a supported factual-image preference.", 400);
   }
+  normalizeLocale(request.outputLocale, "learning language");
   assertIdempotencyKey(request.idempotencyKey);
 }
 
