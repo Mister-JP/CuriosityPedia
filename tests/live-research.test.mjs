@@ -221,7 +221,27 @@ test("sends only the ordered topic trail as prior-content context", () => {
 
   assert.match(input, /1\. radio spectrum\n2\. frequency hopping/);
   assert.match(input, /Question to research now: How does Bluetooth hopping avoid interference\?/);
+  assert.match(input, /not evidence of the learner's knowledge or proficiency/);
   assert.doesNotMatch(input, /Who invented Bluetooth\?|PRIVATE STARTING QUESTION|PRIVATE OLD ANSWER|PRIVATE OLD SOURCE/);
+});
+
+test("prompts research for source fitness, beginner clarity, and intentional visuals", () => {
+  const instructions = liveResearchTestHooks.buildInstructions({
+    name: "Mechanist",
+    cue: "Makes hidden mechanisms legible.",
+    values: ["mechanism"],
+    voiceTraits: ["clear"],
+    avoids: ["jargon"],
+    toolPosture: "Search for first-party descriptions and measured evidence.",
+  });
+
+  assert.match(instructions, /Choose sources for what they are qualified to establish/);
+  assert.match(instructions, /not to maximize the source count/);
+  assert.match(instructions, /first answer block a direct, self-contained answer/);
+  assert.match(instructions, /curious learner with no assumed specialist knowledge/);
+  assert.match(instructions, /first decide what the learner would benefit from seeing/);
+  assert.match(instructions, /doorway for a curious beginner of any age/);
+  assert.match(instructions, /Research posture: Search for first-party descriptions and measured evidence/);
 });
 
 test("repairs citation pointers with source IDs without rewriting prose", () => {
