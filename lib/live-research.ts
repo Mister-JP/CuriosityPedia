@@ -86,9 +86,20 @@ type ProviderImage = {
   caption: string;
 };
 
+type ModelVisualNote = {
+  sourcePageUrl: string;
+  title: string;
+  role: "object" | "process" | "result" | "context" | "comparison" | "scale" | "primary-source";
+  whyIncluded: string;
+  whatToNotice: string[];
+  learning: string;
+  evidenceRelation: "shows" | "illustrates" | "contextualizes" | "supports";
+};
+
 type ModelTurn = {
   topicLabel: string;
   answerBlocks: Array<{ text: string; citationUrls: string[] }>;
+  visualNotes?: ModelVisualNote[];
   transition: string;
   researchSummary: string;
   researchHandoff: ResearchHandoff;
@@ -131,6 +142,7 @@ const TURN_SCHEMA = {
   required: [
     "topicLabel",
     "answerBlocks",
+    "visualNotes",
     "transition",
     "researchSummary",
     "researchHandoff",
@@ -158,6 +170,29 @@ const TURN_SCHEMA = {
             maxItems: 4,
             items: { type: "string", minLength: 6, maxLength: 2_458 },
           },
+        },
+      },
+    },
+    visualNotes: {
+      type: "array",
+      maxItems: 10,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sourcePageUrl", "title", "role", "whyIncluded", "whatToNotice", "learning", "evidenceRelation"],
+        properties: {
+          sourcePageUrl: { type: "string", minLength: 6, maxLength: 2_458 },
+          title: { type: "string", minLength: 3, maxLength: 116 },
+          role: { type: "string", enum: ["object", "process", "result", "context", "comparison", "scale", "primary-source"] },
+          whyIncluded: { type: "string", minLength: 12, maxLength: 288 },
+          whatToNotice: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            items: { type: "string", minLength: 6, maxLength: 192 },
+          },
+          learning: { type: "string", minLength: 12, maxLength: 288 },
+          evidenceRelation: { type: "string", enum: ["shows", "illustrates", "contextualizes", "supports"] },
         },
       },
     },
@@ -634,7 +669,8 @@ function buildInstructions(performer: (typeof PERFORMERS)[number]): string {
     "Write a clear, vivid, intellectually honest answer for a general audience. Separate evidence from metaphor and flag uncertainty in the prose when it matters.",
     "Write each answer block as complete prose of roughly 100 to 750 characters. Do not put Markdown headings, bold markers, or raw list syntax inside answer blocks.",
     "For every answer block, copy one or more exact source URLs that the web search actually consulted into citationUrls.",
-    "When factual images are requested, use image search alongside text research. WonderDrive reads image results directly; do not place image URLs in the answer JSON.",
+    "When factual images are requested, use image search alongside text research. WonderDrive reads image URLs directly; do not place image URLs in the answer JSON.",
+    "For each useful image result, add a visualNotes entry keyed by its exact source page URL. Describe only what is visibly supported, explain why it helps this answer, distinguish direct evidence from illustration or context, and keep whatToNotice concrete. Return an empty visualNotes array when no factual images were used.",
     "Return exactly two genuinely different next questions. Each must hook into one concrete fact, object, creature, place, event, or surprising detail in the visible answer—not just the broad topic.",
     "Make each question feel like a playable rabbit hole: 5–12 words, plain everyday language, one idea at a time, and fun to say out loud. Aim for a question a curious kid can understand instantly and an adult still wants to click.",
     "Prefer concrete wonder, odd comparisons, hidden abilities, vivid cause-and-effect, and small mysteries. For example: 'Could this frog freeze and wake up?', 'Why doesn't this bridge wobble apart?', or 'What else can navigate without eyes?'",
@@ -1094,7 +1130,7 @@ function validateAndMapTurn(
     "research summary",
   );
   const researchHandoff = validateHandoff(modelTurn.researchHandoff, providerSources);
-  const media = imagePreference === "avoid" ? [] : validateMediaGallery(providerImages, topicLabel);
+  const media = imagePreference === "avoid" ? [] : validateMediaGallery(providerImages, topicLabel, modelTurn.visualNotes);
   if (modelTurn.preferredPosition !== 0 && modelTurn.preferredPosition !== 1) {
     throw validationFailure("The preferred path was invalid.");
   }
@@ -1402,9 +1438,15 @@ function normalizeGeneratedProse(value: string) {
     .replace(/\s+/g, " ");
 }
 
-function validateMediaGallery(values: ProviderImage[], topicLabel: string): TurnMedia[] {
+function validateMediaGallery(values: ProviderImage[], topicLabel: string, notes: ModelVisualNote[] = []): TurnMedia[] {
   const seen = new Set<string>();
   const gallery: TurnMedia[] = [];
+  const notesBySource = new Map(
+    notes
+      .filter((note) => isObject(note))
+      .map((note) => [citationComparableUrl(stringValue(note.sourcePageUrl)), note] as const)
+      .filter((entry): entry is [string, ModelVisualNote] => Boolean(entry[0])),
+  );
   for (const value of values) {
     const imageUrl = canonicalUrl(value.imageUrl);
     const sourcePageUrl = canonicalUrl(value.sourcePageUrl);
@@ -1413,12 +1455,32 @@ function validateMediaGallery(values: ProviderImage[], topicLabel: string): Turn
     if (thumbnailUrl && !isSafePublicImageUrl(thumbnailUrl)) continue;
     seen.add(imageUrl);
     const caption = normalizeGeneratedProse(value.caption).slice(0, 384) || `Visual reference for ${topicLabel}`;
+    const note = notesBySource.get(citationComparableUrl(sourcePageUrl) ?? "");
+    const title = note
+      ? normalizeGeneratedProse(note.title).slice(0, 116)
+      : caption.slice(0, 116);
+    const whyIncluded = note
+      ? normalizeGeneratedProse(note.whyIncluded).slice(0, 288)
+      : caption;
+    const whatToNotice = note?.whatToNotice
+      ?.map((item) => normalizeGeneratedProse(item).slice(0, 192))
+      .filter(Boolean)
+      .slice(0, 3) ?? [];
+    const learning = note
+      ? normalizeGeneratedProse(note.learning).slice(0, 288)
+      : `This image provides visual context for ${topicLabel}.`;
     gallery.push({
       imageUrl,
       ...(thumbnailUrl ? { thumbnailUrl } : {}),
       sourcePageUrl,
       caption,
-      alt: caption.slice(0, 288),
+      alt: title.slice(0, 288),
+      title,
+      role: note?.role ?? "context",
+      whyIncluded,
+      whatToNotice: whatToNotice.length ? whatToNotice : [caption],
+      learning,
+      evidenceRelation: note?.evidenceRelation ?? "contextualizes",
     });
     if (gallery.length === 10) break;
   }

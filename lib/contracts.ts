@@ -125,6 +125,12 @@ export type TurnMedia = {
   sourcePageUrl: string;
   caption: string;
   alt: string;
+  title?: string;
+  role?: "object" | "process" | "result" | "context" | "comparison" | "scale" | "primary-source";
+  whyIncluded?: string;
+  whatToNotice?: string[];
+  learning?: string;
+  evidenceRelation?: "shows" | "illustrates" | "contextualizes" | "supports";
 };
 
 export type ResearchHandoff = {

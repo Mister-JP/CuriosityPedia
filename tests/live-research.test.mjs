@@ -39,6 +39,7 @@ const validTurn = {
       citationUrls: ["https://research.example.net/context"],
     },
   ],
+  visualNotes: [],
   media: {
     available: false,
     imageUrl: "",
@@ -92,8 +93,18 @@ test("extracts image search results into a graceful media gallery", () => {
     }],
   };
   const images = liveResearchTestHooks.extractImages(response);
+  const annotatedTurn = structuredClone(validTurn);
+  annotatedTurn.visualNotes = [{
+    sourcePageUrl: "https://example.org/bridge",
+    title: "Main cables of a suspension bridge",
+    role: "process",
+    whyIncluded: "It makes the bridge's load-carrying structure visible.",
+    whatToNotice: ["The deck hangs from vertical suspenders connected to the main cables."],
+    learning: "The cable system redirects the deck's load toward the towers and anchorages.",
+    evidenceRelation: "illustrates",
+  }];
   const mapped = liveResearchTestHooks.validateAndMapTurn(
-    validTurn,
+    annotatedTurn,
     liveResearchTestHooks.extractSources(providerResponse),
     "prefer",
     images,
@@ -101,6 +112,8 @@ test("extracts image search results into a graceful media gallery", () => {
 
   assert.equal(mapped.media.length, 2);
   assert.equal(mapped.media[0].thumbnailUrl, "https://images.example.org/bridge-thumb.jpg");
+  assert.equal(mapped.media[0].title, "Main cables of a suspension bridge");
+  assert.equal(mapped.media[0].whatToNotice.length, 1);
   assert.ok(mapped.sources.some((source) => source.relation === "image"));
 });
 

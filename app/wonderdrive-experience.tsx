@@ -917,7 +917,6 @@ function PerformanceStage({
   const performer = PERFORMERS.find((item) => item.id === journey.performerId)!;
   const historical = turn.id !== journey.currentTurnId;
   const actionable = turn.options.filter((option) => option.state === "proposed").length > 0;
-  const shortBlock = turn.answerBlocks[0];
 
   useEffect(() => {
     if (!deepDiveOpen) return;
@@ -1010,28 +1009,26 @@ function PerformanceStage({
 
         <div className="contained-answer-content">
           <div className="contained-answer-summary">
-            <p className="card-kicker">The short answer</p>
+            <p className="card-kicker">The answer</p>
             <h2>{turn.topicLabel}</h2>
-            <p className="short-answer-copy">
-              {shortBlock?.text ?? turn.answer} {shortBlock ? citations(shortBlock.sourceIds) : null}
-            </p>
+            <div className="contained-answer-prose">
+              {turn.answerBlocks.slice(0, 1).map((block, blockIndex) => (
+                <p key={`${turn.id}-answer-${blockIndex}`}>{block.text} {citations(block.sourceIds)}</p>
+              ))}
+            </div>
             <div className="answer-tags" aria-label="Answer characteristics">
               <span>{turn.topicLabel}</span>
               <span>{turn.sources.length} checked sources</span>
               <span>live research</span>
             </div>
+            <button ref={deepDiveTriggerRef} className="evidence-research-row" type="button" onClick={() => setDeepDiveOpen(true)}>
+              <span><strong>Evidence &amp; research details</strong></span>
+              <span className="deep-dive-cta">Deeper dive ↗</span>
+            </button>
           </div>
 
           <AnswerVisual media={turn.media} />
         </div>
-
-        <button ref={deepDiveTriggerRef} className="evidence-research-row" type="button" onClick={() => setDeepDiveOpen(true)}>
-          <span><strong>Evidence &amp; research details</strong><small>Sources, activity, cost, model, and metadata</small></span>
-          <span className="evidence-row-metrics">
-            {turn.sources.length} sources · {turn.research.usage.webSearchCalls} searches · ${turn.research.usage.estimatedCostUsd.toFixed(3)} · {Math.round(turn.research.usage.latencyMs / 1000)}s · {turn.metadata.modelId}
-          </span>
-          <span className="deep-dive-cta">Deeper dive ↗</span>
-        </button>
       </article>
 
       <section className="journey-directions" aria-labelledby="direction-title">
@@ -1111,30 +1108,74 @@ function AnswerVisual({
   compact?: boolean;
 }) {
   const [failedUrls, setFailedUrls] = useState<string[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const thumbnailRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const visible = media.filter((item) => !failedUrls.includes(item.imageUrl)).slice(0, compact ? 4 : 8);
   if (!visible.length) return null;
+  const activeIndex = Math.min(selectedIndex, visible.length - 1);
+  const selected = visible[activeIndex];
+  const noticeItems = selected.whatToNotice?.length ? selected.whatToNotice : [selected.caption];
+  const roleLabel = (selected.role ?? "context").replace("-", " ");
+
+  function selectFromKeyboard(index: number, event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? visible.length - 1
+        : event.key === "ArrowLeft"
+          ? (index - 1 + visible.length) % visible.length
+          : (index + 1) % visible.length;
+    setSelectedIndex(nextIndex);
+    window.requestAnimationFrame(() => thumbnailRefs.current[nextIndex]?.focus());
+  }
+
   return (
-    <section className={`answer-gallery ${compact ? "compact-visual" : ""}`} aria-label={`${visible.length} visual references`}>
-      <div className="answer-gallery-heading">
-        <span>Visual field notes</span>
-        <small>{visible.length} sourced image{visible.length === 1 ? "" : "s"}</small>
-      </div>
-      <div className="answer-gallery-grid">
+    <section className={`answer-gallery ${compact ? "compact-visual" : ""}`} aria-label="Visual evidence">
+      <figure className="answer-gallery-selected">
+        <a href={selected.sourcePageUrl} target="_blank" rel="noreferrer" aria-label={`${selected.title ?? selected.caption}. Open source.`}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={selected.imageUrl}
+            alt={selected.alt}
+            loading="eager"
+            referrerPolicy="no-referrer"
+            onError={() => setFailedUrls((current) => current.includes(selected.imageUrl) ? current : [...current, selected.imageUrl])}
+          />
+        </a>
+        <figcaption><span>{selected.title ?? selected.caption}</span><a href={selected.sourcePageUrl} target="_blank" rel="noreferrer">Source ↗</a></figcaption>
+      </figure>
+
+      <aside className="answer-gallery-notes" aria-live="polite">
+        <span className="answer-gallery-role">{roleLabel}</span>
+        <h3>{selected.title ?? selected.caption}</h3>
+        <div><strong>Why it is here</strong><p>{selected.whyIncluded ?? selected.caption}</p></div>
+        <div><strong>What to notice</strong><ul>{noticeItems.map((item, index) => <li key={`${selected.imageUrl}-notice-${index}`}>{item}</li>)}</ul></div>
+        <div><strong>What it helps explain</strong><p>{selected.learning ?? selected.caption}</p></div>
+      </aside>
+
+      <div className="answer-gallery-strip" aria-label="Select an image">
         {visible.map((item, index) => (
-          <figure className="answer-gallery-item" key={`${item.imageUrl}-${index}`}>
-            <a href={item.sourcePageUrl} target="_blank" rel="noreferrer" aria-label={`${item.caption}. Open source.`}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={item.thumbnailUrl || item.imageUrl}
-                alt={item.alt}
-                loading={index === 0 ? "eager" : "lazy"}
-                referrerPolicy="no-referrer"
-                onError={() => setFailedUrls((current) => current.includes(item.imageUrl) ? current : [...current, item.imageUrl])}
-              />
-              <span>{String(index + 1).padStart(2, "0")}</span>
-            </a>
-            <figcaption>{item.caption}</figcaption>
-          </figure>
+          <button
+            ref={(node) => { thumbnailRefs.current[index] = node; }}
+            type="button"
+            className={index === activeIndex ? "selected" : ""}
+            key={`${item.imageUrl}-${index}`}
+            aria-label={`Show ${item.title ?? item.caption}`}
+            aria-pressed={index === activeIndex}
+            onClick={() => setSelectedIndex(index)}
+            onKeyDown={(event) => selectFromKeyboard(index, event)}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={item.thumbnailUrl || item.imageUrl}
+              alt=""
+              loading={index === 0 ? "eager" : "lazy"}
+              referrerPolicy="no-referrer"
+              onError={() => setFailedUrls((current) => current.includes(item.imageUrl) ? current : [...current, item.imageUrl])}
+            />
+          </button>
         ))}
       </div>
     </section>

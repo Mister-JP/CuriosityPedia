@@ -174,6 +174,15 @@ const themes: Theme[] = [
       sourcePageUrl: "https://www.loc.gov/item/2010587004/",
       caption: "Souvenir map of Jackson Park and Midway Plaisance, Chicago, 1892. Library of Congress.",
       alt: "Historic illustrated map of Jackson Park and the Midway Plaisance prepared for the World's Columbian Exposition.",
+      title: "Jackson Park and Midway Plaisance in 1892",
+      role: "primary-source",
+      whyIncluded: "The map shows how a city made a particular place and historical moment durable through an official visual record.",
+      whatToNotice: [
+        "The fairgrounds are organized as a deliberate sequence of named spaces.",
+        "The map turns movement through the city into a curated historical route.",
+      ],
+      learning: "Maps do more than record a city; they help decide which places and stories remain legible later.",
+      evidenceRelation: "contextualizes",
     },
     sources: [
       {
