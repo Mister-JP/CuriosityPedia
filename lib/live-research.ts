@@ -21,7 +21,7 @@ import {
   structuredOutput,
 } from "./openai";
 import { recordOpenAIUsage } from "./provider-usage";
-import { localeName } from "./i18n";
+import { localeName, usesCompactWordSegmentation } from "./i18n";
 
 export type PreparedLiveResearch = {
   requestId: string;
@@ -125,6 +125,19 @@ type CitationRecovery = {
   }>;
 };
 
+type ImageNoteRepair = {
+  notes: Array<{
+    imageId: string;
+    noteNumber: number;
+    title: string;
+    role: ModelVisualNote["role"];
+    whyIncluded: string;
+    whatToNotice: string[];
+    learning: string;
+    evidenceRelation: ModelVisualNote["evidenceRelation"];
+  }>;
+};
+
 type CitationRepairResult = {
   turn: ModelTurn;
   unsupportedIndexes: number[];
@@ -187,14 +200,14 @@ const TURN_SCHEMA = {
           sourcePageUrl: { type: "string", minLength: 6, maxLength: 2_458 },
           title: { type: "string", minLength: 3, maxLength: 116 },
           role: { type: "string", enum: ["object", "process", "result", "context", "comparison", "scale", "primary-source"] },
-          whyIncluded: { type: "string", minLength: 72, maxLength: 200 },
+          whyIncluded: { type: "string", minLength: 20, maxLength: 200 },
           whatToNotice: {
             type: "array",
             minItems: 2,
             maxItems: 2,
-            items: { type: "string", minLength: 36, maxLength: 120 },
+            items: { type: "string", minLength: 8, maxLength: 120 },
           },
-          learning: { type: "string", minLength: 72, maxLength: 200 },
+          learning: { type: "string", minLength: 20, maxLength: 200 },
           evidenceRelation: { type: "string", enum: ["shows", "illustrates", "contextualizes", "supports"] },
         },
       },
@@ -510,11 +523,41 @@ export async function runLiveResearch(
   addActivity("check", "Checked that citations resolve to sources consulted in this run");
 
   const providerImages = prepared.imagePreference === "avoid" ? [] : extractImages(completedResponse);
+  const renderedImagePreference = imagePreferenceForQuestion(prepared.imagePreference, prepared.question);
   let modelTurn = parseModelTurn(outputText);
   const supplementalResponses: OpenAIResponse[] = [];
+  const initialMedia = validateMediaGallery(
+    providerImages,
+    normalizeGeneratedProse(modelTurn.topicLabel),
+    modelTurn.visualNotes,
+    prepared.outputLocale,
+  );
+  if (providerImages.length && (modelTurn.visualNotes?.length ?? 0) > 0 && !initialMedia.length) {
+    addActivity("check", "Matched selected visual notes to the provider's factual image results");
+    const deterministicRepair = repairImageNotesBySourcePath(modelTurn, providerImages, prepared.outputLocale);
+    const deterministicMedia = validateMediaGallery(
+      providerImages,
+      normalizeGeneratedProse(deterministicRepair.topicLabel),
+      deterministicRepair.visualNotes,
+      prepared.outputLocale,
+    );
+    if (deterministicMedia.length) {
+      modelTurn = deterministicRepair;
+    } else {
+      try {
+        const repaired = await runImageNoteRepair(modelTurn, providerImages, prepared, externalSignal);
+        supplementalResponses.push(repaired.response);
+        modelTurn = applyImageNoteRepair(modelTurn, providerImages, repaired.repair, prepared.outputLocale);
+      } catch (repairError) {
+        console.error("WonderDrive image-note association repair was not applied", {
+          error: repairError instanceof Error ? repairError.name : "UNKNOWN_ERROR",
+        });
+      }
+    }
+  }
   let draft;
   try {
-    draft = validateAndMapTurn(modelTurn, providerSources, prepared.imagePreference, providerImages, prepared.outputLocale);
+    draft = validateAndMapTurn(modelTurn, providerSources, renderedImagePreference, providerImages, prepared.outputLocale);
   } catch (error) {
     if (!(error instanceof RepositoryError) || error.code !== "CITATION_INVALID") throw error;
     addActivity("check", "A citation pointer did not match the consulted source set; repairing pointers once");
@@ -563,7 +606,7 @@ export async function runLiveResearch(
         modelTurn = pruneUnsupportedBlocks(modelTurn, repairResult.unsupportedIndexes);
       }
     }
-    draft = validateAndMapTurn(modelTurn, providerSources, prepared.imagePreference, providerImages, prepared.outputLocale);
+    draft = validateAndMapTurn(modelTurn, providerSources, renderedImagePreference, providerImages, prepared.outputLocale);
     addActivity("check", "Revalidated the answer against the final consulted source set");
   }
   addActivity("synthesis", "Validated the sourced answer and exactly two distinct next paths");
@@ -643,7 +686,7 @@ function researchUsageContext(
 
 function supplementalUsageContext(
   prepared: PreparedLiveResearch,
-  operation: "citation_repair" | "citation_recovery",
+  operation: "image_note_repair" | "citation_repair" | "citation_recovery",
   purpose: string,
 ) {
   return {
@@ -705,6 +748,278 @@ function buildResearchInput(prepared: PreparedLiveResearch): string {
     context,
     "Produce one complete WonderDrive turn using the required JSON schema.",
   ].join("\n\n");
+}
+
+async function runImageNoteRepair(
+  modelTurn: ModelTurn,
+  providerImages: ProviderImage[],
+  prepared: PreparedLiveResearch,
+  externalSignal?: AbortSignal,
+): Promise<{ repair: ImageNoteRepair; response: OpenAIResponse }> {
+  const images = providerImages.slice(0, 10);
+  const notes = (modelTurn.visualNotes ?? []).slice(0, 10);
+  const imageIds = images.map((_, index) => `I${index + 1}`);
+  const noteNumbers = notes.map((_, index) => index + 1);
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["notes"],
+    properties: {
+      notes: {
+        type: "array",
+        minItems: 0,
+        maxItems: Math.min(images.length, notes.length),
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["imageId", "noteNumber", "title", "role", "whyIncluded", "whatToNotice", "learning", "evidenceRelation"],
+          properties: {
+            imageId: { type: "string", enum: imageIds },
+            noteNumber: { type: "integer", enum: noteNumbers },
+            title: { type: "string", minLength: 3, maxLength: 116 },
+            role: { type: "string", enum: ["object", "process", "result", "context", "comparison", "scale", "primary-source"] },
+            whyIncluded: { type: "string", minLength: 20, maxLength: 200 },
+            whatToNotice: {
+              type: "array",
+              minItems: 2,
+              maxItems: 2,
+              items: { type: "string", minLength: 8, maxLength: 120 },
+            },
+            learning: { type: "string", minLength: 20, maxLength: 200 },
+            evidenceRelation: { type: "string", enum: ["shows", "illustrates", "contextualizes", "supports"] },
+          },
+        },
+      },
+    },
+  } as const;
+  const startedAt = Date.now();
+  let usageRecorded = false;
+  const controller = new AbortController();
+  const abortFromClient = () => controller.abort("WonderDrive client disconnected");
+  externalSignal?.addEventListener("abort", abortFromClient, { once: true });
+  const timeout = setTimeout(() => controller.abort("WonderDrive image-note repair timeout"), 20_000);
+  try {
+    const response = await requestOpenAI({
+      model: prepared.modelId,
+      instructions: [
+        `WonderDrive prompt ${PROMPT_VERSION}. Associate already-written visual notes with already-retrieved factual image results.`,
+        "Do not browse, rewrite, summarize, or invent visual details.",
+        "Return a note only when one supplied visual note clearly describes one supplied image caption or source page. Never match by broad topic alone.",
+        "Each imageId and noteNumber may appear at most once. Omit uncertain matches.",
+        "The server owns imageId values; copy them exactly instead of returning URLs.",
+        `Write repaired reader-facing fields in ${localeName(prepared.outputLocale)} (${prepared.outputLocale}). Preserve the supplied note's visible claims. Use the natural-language length of an 18–26-word English sentence for whyIncluded and learning, and 9–15 English words for each whatToNotice item; follow the output language's normal segmentation and syntax.`,
+        "Include at least one concrete subject term from the matched image caption in the repaired title or prose. Never add a detail absent from the supplied note and caption.",
+      ].join("\n"),
+      input: JSON.stringify({
+        imageResults: images.map((image, index) => ({
+          imageId: imageIds[index],
+          caption: image.caption,
+          sourcePageUrl: image.sourcePageUrl,
+        })),
+        visualNotes: notes.map((note, index) => ({
+          noteNumber: index + 1,
+          sourcePageUrl: note.sourcePageUrl,
+          title: note.title,
+          whyIncluded: note.whyIncluded,
+          whatToNotice: note.whatToNotice,
+          learning: note.learning,
+        })),
+      }),
+      max_output_tokens: 1_800,
+      reasoning: { effort: "low" },
+      text: structuredOutput("wonderdrive_image_note_repair", schema),
+      safety_identifier: `wd_image_repair_${prepared.identityId}`.slice(0, 64),
+      store: false,
+    }, { signal: controller.signal });
+    if (!response.ok) {
+      usageRecorded = true;
+      await recordOpenAIUsage({
+        ...supplementalUsageContext(prepared, "image_note_repair", "image_source_url_mismatch"),
+        outcome: "http_error",
+        providerRequestId: response.headers.get("x-request-id"),
+        httpStatus: response.status,
+        latencyMs: Date.now() - startedAt,
+        errorCode: `HTTP_${response.status}`,
+        errorMessage: "Image-note repair provider request was rejected.",
+      });
+      throw imageNoteRepairFailure();
+    }
+    const payload = (await response.json()) as OpenAIResponse;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(extractOutputText(payload));
+    } catch {
+      usageRecorded = true;
+      await recordOpenAIUsage({
+        ...supplementalUsageContext(prepared, "image_note_repair", "image_source_url_mismatch"),
+        outcome: "validation_failed",
+        response: payload,
+        providerRequestId: response.headers.get("x-request-id"),
+        httpStatus: response.status,
+        latencyMs: Date.now() - startedAt,
+        errorCode: "SCHEMA_INVALID",
+        errorMessage: "Image-note repair returned invalid structured output.",
+      });
+      throw imageNoteRepairFailure();
+    }
+    if (!isObject(parsed) || !Array.isArray(parsed.notes)) {
+      usageRecorded = true;
+      await recordOpenAIUsage({
+        ...supplementalUsageContext(prepared, "image_note_repair", "image_source_url_mismatch"),
+        outcome: "validation_failed",
+        response: payload,
+        providerRequestId: response.headers.get("x-request-id"),
+        httpStatus: response.status,
+        latencyMs: Date.now() - startedAt,
+        errorCode: "SCHEMA_INVALID",
+        errorMessage: "Image-note repair returned an invalid note collection.",
+      });
+      throw imageNoteRepairFailure();
+    }
+    const repair = parsed as ImageNoteRepair;
+    applyImageNoteRepair(modelTurn, providerImages, repair, prepared.outputLocale);
+    usageRecorded = true;
+    await recordOpenAIUsage({
+      ...supplementalUsageContext(prepared, "image_note_repair", "image_source_url_mismatch"),
+      outcome: "completed",
+      response: payload,
+      providerRequestId: response.headers.get("x-request-id"),
+      httpStatus: response.status,
+      latencyMs: Date.now() - startedAt,
+      metadata: { providerImageCount: images.length, visualNoteCount: notes.length, matchedCount: repair.notes.length },
+    });
+    return { repair, response: payload };
+  } catch (error) {
+    if (!usageRecorded) {
+      await recordOpenAIUsage({
+        ...supplementalUsageContext(prepared, "image_note_repair", "image_source_url_mismatch"),
+        outcome: "transport_error",
+        latencyMs: Date.now() - startedAt,
+        errorCode: controller.signal.aborted ? "ABORTED" : error instanceof Error ? error.name : "UNKNOWN_ERROR",
+        errorMessage: controller.signal.aborted
+          ? String(controller.signal.reason ?? "Image-note repair was aborted.")
+          : error instanceof Error ? error.message : "Image-note repair was interrupted.",
+      });
+    }
+    if (error instanceof RepositoryError) throw error;
+    throw imageNoteRepairFailure();
+  } finally {
+    clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromClient);
+  }
+}
+
+function applyImageNoteRepair(
+  modelTurn: ModelTurn,
+  providerImages: ProviderImage[],
+  repair: ImageNoteRepair,
+  outputLocale: SupportedLocale = "en",
+): ModelTurn {
+  const notes = modelTurn.visualNotes ?? [];
+  if (!Array.isArray(repair.notes) || repair.notes.length > Math.min(providerImages.length, notes.length, 10)) {
+    throw imageNoteRepairFailure();
+  }
+  const usedImages = new Set<number>();
+  const usedNotes = new Set<number>();
+  const repairedNotes: ModelVisualNote[] = [];
+  for (const match of repair.notes) {
+    if (!isObject(match) || typeof match.imageId !== "string" || typeof match.noteNumber !== "number") {
+      throw imageNoteRepairFailure();
+    }
+    const imageMatch = /^I([1-9]|10)$/.exec(match.imageId);
+    const imageIndex = imageMatch ? Number(imageMatch[1]) - 1 : -1;
+    const noteIndex = match.noteNumber - 1;
+    if (
+      imageIndex < 0 || imageIndex >= providerImages.length || noteIndex < 0 || noteIndex >= notes.length
+      || !Number.isInteger(match.noteNumber) || usedImages.has(imageIndex) || usedNotes.has(noteIndex)
+    ) {
+      throw imageNoteRepairFailure();
+    }
+    if (
+      !["object", "process", "result", "context", "comparison", "scale", "primary-source"].includes(stringValue(match.role))
+      || !["shows", "illustrates", "contextualizes", "supports"].includes(stringValue(match.evidenceRelation))
+    ) {
+      throw imageNoteRepairFailure();
+    }
+    usedImages.add(imageIndex);
+    usedNotes.add(noteIndex);
+    const repairedNote: ModelVisualNote = {
+      sourcePageUrl: providerImages[imageIndex].sourcePageUrl,
+      title: stringValue(match.title),
+      role: match.role as ModelVisualNote["role"],
+      whyIncluded: stringValue(match.whyIncluded),
+      whatToNotice: Array.isArray(match.whatToNotice) ? match.whatToNotice.map((item) => stringValue(item)) : [],
+      learning: stringValue(match.learning),
+      evidenceRelation: match.evidenceRelation as ModelVisualNote["evidenceRelation"],
+    };
+    if (!isSpecificVisualNote(repairedNote, providerImages[imageIndex].caption, outputLocale)) {
+      throw imageNoteRepairFailure();
+    }
+    repairedNotes.push(repairedNote);
+  }
+  return { ...modelTurn, visualNotes: repairedNotes };
+}
+
+function repairImageNotesBySourcePath(
+  modelTurn: ModelTurn,
+  providerImages: ProviderImage[],
+  outputLocale: SupportedLocale = "en",
+): ModelTurn {
+  const usedImages = new Set<number>();
+  const repairedNotes: ModelVisualNote[] = [];
+  for (const note of modelTurn.visualNotes ?? []) {
+    const noteUrl = canonicalUrl(note.sourcePageUrl);
+    if (!noteUrl) continue;
+    const parsedNoteUrl = new URL(noteUrl);
+    const noteHost = parsedNoteUrl.hostname.toLowerCase().replace(/^www\./, "");
+    const noteTerms = urlPathTerms(parsedNoteUrl);
+    const candidates = providerImages
+      .map((image, index) => {
+        const imageUrl = canonicalUrl(image.sourcePageUrl);
+        if (!imageUrl || usedImages.has(index)) return null;
+        const parsedImageUrl = new URL(imageUrl);
+        const imageHost = parsedImageUrl.hostname.toLowerCase().replace(/^www\./, "");
+        if (imageHost !== noteHost) return null;
+        const imageTerms = urlPathTerms(parsedImageUrl);
+        const overlap = [...noteTerms].filter((term) => imageTerms.has(term)).length;
+        const score = overlap / Math.max(noteTerms.size, imageTerms.size, 1);
+        return { image, index, overlap, score };
+      })
+      .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+      .sort((left, right) => right.score - left.score || right.overlap - left.overlap);
+    const best = candidates[0];
+    const runnerUp = candidates[1];
+    if (!best || best.overlap < 2 || best.score < 0.5 || (runnerUp && runnerUp.score === best.score)) continue;
+    const repaired = { ...note, sourcePageUrl: best.image.sourcePageUrl };
+    if (!isSpecificVisualNote(repaired, best.image.caption, outputLocale)) continue;
+    usedImages.add(best.index);
+    repairedNotes.push(repaired);
+  }
+  return repairedNotes.length ? { ...modelTurn, visualNotes: repairedNotes } : modelTurn;
+}
+
+function urlPathTerms(url: URL) {
+  let pathname = url.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // Keep the encoded path when a provider returns malformed percent escapes.
+  }
+  return new Set(
+    pathname
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 3 && !["html", "htm", "index", "photo", "photos", "image", "images"].includes(term)),
+  );
+}
+
+function imageNoteRepairFailure() {
+  return new RepositoryError(
+    "SCHEMA_INVALID",
+    "The optional factual-image notes could not be associated safely; the text answer can continue without them.",
+    502,
+    false,
+  );
 }
 
 function parseModelTurn(outputText: string): ModelTurn {
@@ -1147,7 +1462,10 @@ function validateAndMapTurn(
     "research summary",
   );
   const researchHandoff = validateHandoff(modelTurn.researchHandoff, providerSources);
-  const media = imagePreference === "avoid" ? [] : validateMediaGallery(providerImages, topicLabel, modelTurn.visualNotes, outputLocale);
+  let media = imagePreference === "avoid" ? [] : validateMediaGallery(providerImages, topicLabel, modelTurn.visualNotes, outputLocale);
+  if (imagePreference === "prefer" && !media.length) {
+    media = fallbackMediaGallery(providerImages, topicLabel);
+  }
   if (modelTurn.preferredPosition !== 0 && modelTurn.preferredPosition !== 1) {
     throw validationFailure("The preferred path was invalid.");
   }
@@ -1461,10 +1779,6 @@ const VISUAL_NOTE_WORD_LIMITS = {
   learning: [18, 26],
 } as const;
 
-const VISUAL_STOP_WORDS = new Set([
-  "about", "after", "also", "and", "are", "from", "have", "into", "more", "that", "the", "their", "this", "through", "with",
-]);
-
 function words(value: string, locale: SupportedLocale = "en") {
   const normalized = normalizeGeneratedProse(value);
   if (typeof Intl.Segmenter === "function") {
@@ -1480,24 +1794,15 @@ function withinWordLimit(value: string, [minimum, maximum]: readonly [number, nu
   return count >= minimum && count <= maximum;
 }
 
-function meaningfulWords(value: string) {
-  return new Set(words(value).map((word) => word.toLowerCase()).filter((word) => word.length >= 4 && !VISUAL_STOP_WORDS.has(word)));
-}
-
-function isSpecificVisualNote(note: ModelVisualNote, caption: string, locale: SupportedLocale) {
-  const proseLimit = VISUAL_NOTE_WORD_LIMITS.whyIncluded;
-  const noticeLimit = VISUAL_NOTE_WORD_LIMITS.notice;
+function isSpecificVisualNote(note: ModelVisualNote, _caption: string, locale: SupportedLocale) {
+  const proseLimit = usesCompactWordSegmentation(locale) ? [8, 40] as const : VISUAL_NOTE_WORD_LIMITS.whyIncluded;
+  const noticeLimit = usesCompactWordSegmentation(locale) ? [4, 25] as const : VISUAL_NOTE_WORD_LIMITS.notice;
   if (!withinWordLimit(note.whyIncluded, proseLimit, locale)) return false;
   if (!Array.isArray(note.whatToNotice) || note.whatToNotice.length !== 2) return false;
   if (!note.whatToNotice.every((item) => withinWordLimit(item, noticeLimit, locale))) return false;
   if (!withinWordLimit(note.learning, proseLimit, locale)) return false;
 
-  if (locale !== "en") return true;
-
-  const captionTerms = meaningfulWords(caption);
-  if (!captionTerms.size) return false;
-  const noteTerms = meaningfulWords([note.title, note.whyIncluded, ...note.whatToNotice, note.learning].join(" "));
-  return [...captionTerms].some((term) => noteTerms.has(term));
+  return true;
 }
 
 function validateMediaGallery(
@@ -1548,6 +1853,38 @@ function validateMediaGallery(
   return gallery;
 }
 
+function imagePreferenceForQuestion(imagePreference: ImagePreference, question: string): ImagePreference {
+  if (imagePreference !== "when-useful") return imagePreference;
+  return /\b(images?|photos?|photographs?|pictures?|visuals?)\b/i.test(question) ? "prefer" : imagePreference;
+}
+
+function fallbackMediaGallery(values: ProviderImage[], topicLabel: string): TurnMedia[] {
+  const seen = new Set<string>();
+  const seenSources = new Set<string>();
+  const gallery: TurnMedia[] = [];
+  for (const value of values) {
+    const imageUrl = canonicalUrl(value.imageUrl);
+    const sourcePageUrl = canonicalUrl(value.sourcePageUrl);
+    const thumbnailUrl = canonicalUrl(value.thumbnailUrl ?? "");
+    if (!imageUrl || !sourcePageUrl || !isSafePublicImageUrl(imageUrl) || seen.has(imageUrl) || seenSources.has(sourcePageUrl)) continue;
+    if (thumbnailUrl && !isSafePublicImageUrl(thumbnailUrl)) continue;
+    const caption = normalizeGeneratedProse(value.caption).slice(0, 384) || `Visual reference for ${topicLabel}`;
+    seen.add(imageUrl);
+    seenSources.add(sourcePageUrl);
+    gallery.push({
+      imageUrl,
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
+      sourcePageUrl,
+      caption,
+      alt: caption.slice(0, 288),
+      title: caption.slice(0, 116),
+      role: "context",
+    });
+    if (gallery.length === 3) break;
+  }
+  return gallery;
+}
+
 function isSafePublicImageUrl(value: string) {
   const url = new URL(value);
   const host = url.hostname.toLowerCase();
@@ -1586,12 +1923,16 @@ function numberValue(value: unknown): number {
 }
 
 export const liveResearchTestHooks = {
+  applyImageNoteRepair,
   applyCitationRepair,
   applyCitationRecovery,
   buildInstructions,
   buildResearchInput,
   extractImages,
   extractSources,
+  fallbackMediaGallery,
+  imagePreferenceForQuestion,
   pruneUnsupportedBlocks,
+  repairImageNotesBySourcePath,
   validateAndMapTurn,
 };

@@ -11,7 +11,21 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowLeft, ArrowRight } from "@phosphor-icons/react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CaretDown,
+  CaretRight,
+  CornersOut,
+  Crosshair,
+  ListBullets,
+  MagnifyingGlass,
+  Minus,
+  Path,
+  Plus,
+  TreeStructure,
+  X,
+} from "@phosphor-icons/react";
 import {
   BOOTSTRAP_CATALOG,
   DEFAULT_PREFERENCES,
@@ -24,6 +38,7 @@ import type {
   BootstrapCatalog,
   CompareResult,
   DiagnosticsReport,
+  ApiFailure,
   ImagePreference,
   JourneyDetail,
   JourneySnapshot,
@@ -34,12 +49,14 @@ import type {
   PerformerId,
   ResearchPreset,
   TextSize,
+  UsageSummary,
   UserPreferences,
   Viewer,
 } from "../lib/contracts";
 import { SUPPORTED_LOCALES, localeDirection } from "../lib/i18n";
 import {
   api,
+  errorCodeFrom,
   type LiveResearchState,
   messageFrom,
   starterRecommendationsUrl,
@@ -47,7 +64,7 @@ import {
 } from "./client-api";
 import { I18nProvider, translate, useI18n } from "./i18n";
 
-type View = "start" | "journey" | "map" | "library" | "compare" | "settings";
+type View = "start" | "journey" | "map" | "library" | "compare" | "usage" | "settings";
 
 type SessionPayload = {
   journeys: JourneySummary[];
@@ -69,6 +86,7 @@ const navItems: Array<{ id: View; label: string }> = [
   { id: "start", label: "New drive" },
   { id: "library", label: "Library" },
   { id: "compare", label: "Compare" },
+  { id: "usage", label: "Usage" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -81,12 +99,16 @@ export function WonderDriveExperience() {
   const [loading, setLoading] = useState(true);
   const [mutation, setMutation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ApiFailure["error"]["code"] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [comparison, setComparison] = useState<CompareResult | null>(null);
   const [liveResearch, setLiveResearch] = useState<LiveResearchState | null>(null);
   const [catalog, setCatalog] = useState<BootstrapCatalog>(BOOTSTRAP_CATALOG);
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
   const [nextModelId, setNextModelId] = useState<ModelId | null>(null);
   const [personalizedStarters, setPersonalizedStarters] = useState<PersonalizedStarter[]>(
     BOOTSTRAP_CATALOG.discoveryStarters,
@@ -95,6 +117,7 @@ export function WonderDriveExperience() {
 
   const refreshSession = useCallback(async () => {
     setError(null);
+    setErrorCode(null);
     try {
       const [session, bootstrap] = await Promise.all([
         api<SessionPayload>("/api/session"),
@@ -109,8 +132,23 @@ export function WonderDriveExperience() {
         .catch(() => setPersonalizedStarters(bootstrap.data.catalog.discoveryStarters));
     } catch (cause) {
       setError(messageFrom(cause));
+      setErrorCode(errorCodeFrom(cause));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshUsage = useCallback(async () => {
+    setUsageLoading(true);
+    setUsageError(null);
+    try {
+      const payload = await api<UsageSummary>("/api/usage");
+      setViewer(payload.viewer);
+      setUsage(payload.data);
+    } catch (cause) {
+      setUsageError(messageFrom(cause));
+    } finally {
+      setUsageLoading(false);
     }
   }, []);
 
@@ -121,11 +159,13 @@ export function WonderDriveExperience() {
   ): Promise<T | undefined> => {
     setMutation(key);
     setError(null);
+    setErrorCode(null);
     try {
       return await work();
     } catch (cause) {
       const message = messageFrom(cause);
       setError(message);
+      setErrorCode(errorCodeFrom(cause));
       onError?.(message);
     } finally {
       setMutation(null);
@@ -152,6 +192,13 @@ export function WonderDriveExperience() {
     void refreshSession();
   }, [refreshSession]);
 
+  useEffect(() => {
+    if (view !== "usage") return;
+    // The route transition intentionally refreshes server-owned rolling counters.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshUsage();
+  }, [refreshUsage, view]);
+
   const openJourney = useCallback(async (journeyId: string, targetView: View = "journey") => {
     await runMutation(`open-${journeyId}`, async () => {
       const payload = await api<JourneyDetail>(`/api/journeys/${journeyId}`);
@@ -168,6 +215,15 @@ export function WonderDriveExperience() {
     imagePreference: ImagePreference;
     outputLocale: UserPreferences["defaultOutputLocale"];
   }) {
+    if (viewer && journeys.length >= viewer.journeyLimit) {
+      setErrorCode("JOURNEY_LIMIT");
+      setError(t("Your saved-journey library is full ({count}/{limit}). Delete one journey to make room.", {
+        count: journeys.length,
+        limit: viewer.journeyLimit,
+      }));
+      setView("library");
+      return;
+    }
     await runMutation("create", async () => {
       setView("journey");
       setLiveResearch({
@@ -178,6 +234,7 @@ export function WonderDriveExperience() {
         status: "running",
         result: null,
         error: null,
+        errorCode: null,
         diagnosticId: null,
         retryAttempt: 0,
         maxRetries: 0,
@@ -222,6 +279,7 @@ export function WonderDriveExperience() {
           status: "running",
           result: null,
           error: null,
+          errorCode: null,
           diagnosticId: null,
           retryAttempt: 0,
           maxRetries: 0,
@@ -393,7 +451,15 @@ export function WonderDriveExperience() {
       {error && (
         <div className="error-banner" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={() => { setError(null); void refreshSession(); }}>{t("Reconnect")}</button>
+          <div className="error-banner-actions">
+            {errorCode === "JOURNEY_LIMIT" ? (
+              <button type="button" onClick={() => { setError(null); setView("library"); }}>{t("Manage saved journeys")}</button>
+            ) : errorCode === "LIVE_RESEARCH_LIMIT" || errorCode === "BUDGET_EXCEEDED" ? (
+              <button type="button" onClick={() => { setError(null); setView("usage"); }}>{t("View usage")}</button>
+            ) : (
+              <button type="button" onClick={() => { setError(null); void refreshSession(); }}>{t("Reconnect")}</button>
+            )}
+          </div>
         </div>
       )}
       {notice && (
@@ -408,6 +474,7 @@ export function WonderDriveExperience() {
       ) : liveResearch ? (
         <JourneyBufferingStage
           state={liveResearch}
+          errorCode={liveResearch.errorCode ?? errorCode}
           onComplete={() => {
             if (liveResearch.result) {
               setActiveJourney(liveResearch.result);
@@ -418,7 +485,9 @@ export function WonderDriveExperience() {
           }}
           onBack={() => {
             setLiveResearch(null);
-            setView(activeJourney ? "journey" : "start");
+            if ((liveResearch.errorCode ?? errorCode) === "JOURNEY_LIMIT") setView("library");
+            else if (["LIVE_RESEARCH_LIMIT", "BUDGET_EXCEEDED"].includes(liveResearch.errorCode ?? errorCode ?? "")) setView("usage");
+            else setView(activeJourney ? "journey" : "start");
           }}
         />
       ) : view === "start" ? (
@@ -457,6 +526,15 @@ export function WonderDriveExperience() {
           }}
           onCompare={() => void compare()}
           onNew={() => setView("start")}
+        />
+      ) : view === "usage" ? (
+        <UsageView
+          usage={usage}
+          viewer={viewer}
+          loading={usageLoading}
+          error={usageError}
+          onRefresh={() => void refreshUsage()}
+          onOpenLibrary={() => setView("library")}
         />
       ) : view === "settings" ? (
         <SettingsView
@@ -833,10 +911,12 @@ function useQuestionPlaceholder(questions: string[], active: boolean) {
 
 function JourneyBufferingStage({
   state,
+  errorCode,
   onComplete,
   onBack,
 }: {
   state: LiveResearchState;
+  errorCode: ApiFailure["error"]["code"] | null;
   onComplete: () => void;
   onBack: () => void;
 }) {
@@ -848,6 +928,9 @@ function JourneyBufferingStage({
   }, [onComplete, state.status]);
 
   const performer = PERFORMERS.find((item) => item.id === state.performerId) ?? PERFORMERS[0];
+  const capacityError = errorCode === "JOURNEY_LIMIT";
+  const usageError = errorCode === "LIVE_RESEARCH_LIMIT" || errorCode === "BUDGET_EXCEEDED";
+  const stoppedLabel = capacityError ? t("Library full") : usageError ? t("Usage limit reached") : t("Research stopped");
 
   return (
     <section className="performance-stage buffering-stage" aria-labelledby="buffering-title" aria-busy={state.status === "running"}>
@@ -858,8 +941,8 @@ function JourneyBufferingStage({
         </div>
         <div className={`buffering-status ${state.status}`} role="status" aria-live="polite">
           <span className="buffering-dot" aria-hidden="true" />
-          <strong>{state.status === "complete" ? t("Answer ready") : state.status === "error" ? t("Research stopped") : state.retryAttempt > 0 ? t("Retrying {attempt} of {max}", { attempt: state.retryAttempt, max: state.maxRetries }) : t("Buffering answer")}</strong>
-          <small>{state.status === "running" ? state.message : state.status === "complete" ? t("Placing the answer into this card") : t("Nothing incomplete was saved")}</small>
+          <strong>{state.status === "complete" ? t("Answer ready") : state.status === "error" ? stoppedLabel : state.retryAttempt > 0 ? t("Retrying {attempt} of {max}", { attempt: state.retryAttempt, max: state.maxRetries }) : t("Buffering answer")}</strong>
+          <small>{state.status === "running" ? state.message : state.status === "complete" ? t("Placing the answer into this card") : capacityError || usageError ? t("No research was started") : t("Nothing incomplete was saved")}</small>
         </div>
       </header>
 
@@ -874,11 +957,11 @@ function JourneyBufferingStage({
           <div className="buffering-error" role="alert">
             <span aria-hidden="true">!</span>
             <div>
-              <strong>{t("This turn was not committed")}</strong>
+              <strong>{capacityError ? t("Your saved-journey library is full") : usageError ? t("Your rolling usage limit is reached") : t("This turn was not committed")}</strong>
               <p>{state.error}</p>
               {state.diagnosticId && <code>Diagnostic {formatDiagnosticId(state.diagnosticId)}</code>}
             </div>
-            <button type="button" onClick={onBack}>{t("Return safely")} →</button>
+            <button type="button" onClick={onBack}>{capacityError ? t("Manage saved journeys") : usageError ? t("View usage") : t("Return safely")} →</button>
           </div>
         ) : (
           <>
@@ -1052,7 +1135,7 @@ function PerformanceStage({
             </button>
           </div>
 
-          <AnswerVisual media={turn.media} outputLocale={turn.metadata.outputLocale} />
+          <AnswerVisual media={turn.media} />
         </div>
       </article>
 
@@ -1103,7 +1186,7 @@ function PerformanceStage({
                 {turn.answerBlocks.map((block, blockIndex) => <p key={`${turn.id}-deep-${blockIndex}`}>{block.text} {citations(block.sourceIds)}</p>)}
               </div>
               <aside className="deep-dive-evidence">
-                <AnswerVisual media={turn.media} outputLocale={turn.metadata.outputLocale} compact />
+                <AnswerVisual media={turn.media} compact />
                 <h3>{t("Sources")}</h3>
                 <ol>{turn.sources.map((source, index) => <li key={source.id}><span>{index + 1}</span><div dir="auto"><strong>{source.title}</strong><small>{source.publisher} · {source.relation}</small></div><a href={source.url} target="_blank" rel="noreferrer">{t("Open")} ↗</a></li>)}</ol>
               </aside>
@@ -1127,11 +1210,9 @@ function PerformanceStage({
 
 function AnswerVisual({
   media,
-  outputLocale,
   compact = false,
 }: {
   media: JourneyTurn["media"];
-  outputLocale: JourneyTurn["metadata"]["outputLocale"];
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -1139,7 +1220,7 @@ function AnswerVisual({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const thumbnailRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const visible = media
-    .filter((item) => !failedUrls.includes(item.imageUrl) && hasBalancedVisualNotes(item, outputLocale))
+    .filter((item) => !failedUrls.includes(item.imageUrl))
     .slice(0, compact ? 4 : 8);
   if (!visible.length) return null;
   const activeIndex = Math.min(selectedIndex, visible.length - 1);
@@ -1172,11 +1253,19 @@ function AnswerVisual({
           <a href={selected.sourcePageUrl} target="_blank" rel="noreferrer" aria-label={`${selected.title ?? selected.caption}. ${t("Open")} ${t("Source")}.`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
+              key={selected.imageUrl}
               src={selected.imageUrl}
               alt={selected.alt}
               loading="eager"
               referrerPolicy="no-referrer"
-              onError={() => setFailedUrls((current) => current.includes(selected.imageUrl) ? current : [...current, selected.imageUrl])}
+              onError={(event) => {
+                if (selected.thumbnailUrl && selected.thumbnailUrl !== selected.imageUrl && event.currentTarget.dataset.fallbackAttempted !== "true") {
+                  event.currentTarget.dataset.fallbackAttempted = "true";
+                  event.currentTarget.src = selected.thumbnailUrl;
+                  return;
+                }
+                setFailedUrls((current) => current.includes(selected.imageUrl) ? current : [...current, selected.imageUrl]);
+              }}
             />
           </a>
           {visible.length > 1 && (
@@ -1220,7 +1309,14 @@ function AnswerVisual({
               alt=""
               loading={index === 0 ? "eager" : "lazy"}
               referrerPolicy="no-referrer"
-              onError={() => setFailedUrls((current) => current.includes(item.imageUrl) ? current : [...current, item.imageUrl])}
+              onError={(event) => {
+                if (item.thumbnailUrl && item.thumbnailUrl !== item.imageUrl && event.currentTarget.dataset.fallbackAttempted !== "true") {
+                  event.currentTarget.dataset.fallbackAttempted = "true";
+                  event.currentTarget.src = item.imageUrl;
+                  return;
+                }
+                setFailedUrls((current) => current.includes(item.imageUrl) ? current : [...current, item.imageUrl]);
+              }}
             />
           </button>
         ))}
@@ -1229,23 +1325,197 @@ function AnswerVisual({
   );
 }
 
-function hasBalancedVisualNotes(item: JourneyTurn["media"][number], locale: JourneyTurn["metadata"]["outputLocale"]) {
-  const wordCount = (value: string) => [...new Intl.Segmenter(locale, { granularity: "word" }).segment(value)].filter((segment) => segment.isWordLike).length;
-  const whyCount = wordCount(item.whyIncluded ?? "");
-  const learningCount = wordCount(item.learning ?? "");
-  const proseMinimum = 18;
-  const proseMaximum = 26;
-  const noticeMinimum = 9;
-  const noticeMaximum = 15;
-  return whyCount >= proseMinimum
-    && whyCount <= proseMaximum
-    && learningCount >= proseMinimum
-    && learningCount <= proseMaximum
-    && item.whatToNotice?.length === 2
-    && item.whatToNotice.every((notice) => {
-      const count = wordCount(notice);
-      return count >= noticeMinimum && count <= noticeMaximum;
+type GraphDensity = "overview" | "topics" | "detail";
+type GraphViewMode = "graph" | "outline";
+
+type JourneyGraphNode = {
+  id: string;
+  parentId: string | null;
+  kind: "turn" | "open" | "cluster";
+  turn: JourneyTurn;
+  option: JourneyTurn["options"][number] | null;
+  branchPosition: 0 | 1;
+  children: JourneyGraphNode[];
+  turnCount: number;
+  openCount: number;
+};
+
+type PositionedGraphNode = {
+  node: JourneyGraphNode;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type GraphLayout = {
+  nodes: PositionedGraphNode[];
+  width: number;
+  height: number;
+  mobile: boolean;
+};
+
+function buildJourneyGraph(journey: JourneyDetail): JourneyGraphNode {
+  const turnById = new Map(journey.turns.map((turn) => [turn.id, turn]));
+  const childTurns = new Map<string, JourneyTurn[]>();
+  for (const turn of journey.turns) {
+    if (!turn.parentTurnId) continue;
+    childTurns.set(turn.parentTurnId, [...(childTurns.get(turn.parentTurnId) ?? []), turn]);
+  }
+  const resultByOption = new Map(
+    journey.actions
+      .filter((action) => action.optionId && action.resultTurnId)
+      .map((action) => [`${action.turnId}:${action.optionId}`, action.resultTurnId as string]),
+  );
+  const rootTurn = journey.turns.find((turn) => !turn.parentTurnId) ?? journey.turns[0];
+
+  const buildTurn = (turn: JourneyTurn, parentId: string | null, branchPosition: 0 | 1): JourneyGraphNode => {
+    const directChildren = childTurns.get(turn.id) ?? [];
+    const usedChildren = new Set<string>();
+    const children: JourneyGraphNode[] = [];
+
+    for (const option of [...turn.options].sort((left, right) => left.position - right.position)) {
+      const resultId = resultByOption.get(`${turn.id}:${option.id}`);
+      const resultTurn = resultId ? turnById.get(resultId) : undefined;
+      if (resultTurn && resultTurn.parentTurnId === turn.id) {
+        usedChildren.add(resultTurn.id);
+        children.push(buildTurn(resultTurn, turn.id, option.position));
+      } else if (option.state === "proposed") {
+        children.push({
+          id: `open:${turn.id}:${option.id}`,
+          parentId: turn.id,
+          kind: "open",
+          turn,
+          option,
+          branchPosition: option.position,
+          children: [],
+          turnCount: 0,
+          openCount: 1,
+        });
+      }
+    }
+
+    for (const child of directChildren.filter((candidate) => !usedChildren.has(candidate.id))) {
+      children.push(buildTurn(child, turn.id, children.length ? 1 : 0));
+    }
+
+    return {
+      id: turn.id,
+      parentId,
+      kind: "turn",
+      turn,
+      option: null,
+      branchPosition,
+      children,
+      turnCount: 1 + children.reduce((total, child) => total + child.turnCount, 0),
+      openCount: children.reduce((total, child) => total + child.openCount, 0),
+    };
+  };
+
+  return buildTurn(rootTurn, null, 0);
+}
+
+function findGraphNode(root: JourneyGraphNode, id: string): JourneyGraphNode | null {
+  if (root.id === id) return root;
+  for (const child of root.children) {
+    const match = findGraphNode(child, id);
+    if (match) return match;
+  }
+  return null;
+}
+
+function findGraphPath(root: JourneyGraphNode, id: string): JourneyGraphNode[] | null {
+  if (root.id === id) return [root];
+  for (const child of root.children) {
+    const path = findGraphPath(child, id);
+    if (path) return [root, ...path];
+  }
+  return null;
+}
+
+function visibleJourneyGraph(
+  root: JourneyGraphNode,
+  routeIds: Set<string>,
+  density: GraphDensity,
+  mobile: boolean,
+  expanded: Set<string>,
+): JourneyGraphNode {
+  const children = root.children.map((child) => {
+    const foldThreshold = mobile ? 1 : density === "overview" ? 2 : density === "topics" ? 5 : Number.POSITIVE_INFINITY;
+    const shouldFold = child.kind === "turn"
+      && !routeIds.has(child.id)
+      && child.children.length > 0
+      && child.turnCount > foldThreshold
+      && !expanded.has(child.id);
+    if (shouldFold) {
+      return {
+        ...child,
+        id: `cluster:${child.id}`,
+        kind: "cluster" as const,
+        children: [],
+      };
+    }
+    return visibleJourneyGraph(child, routeIds, density, mobile, expanded);
+  });
+  return { ...root, children };
+}
+
+function desktopGraphLayout(root: JourneyGraphNode, density: GraphDensity): GraphLayout {
+  const dimensions = density === "overview"
+    ? { width: 132, height: 58, column: 182, row: 82 }
+    : density === "topics"
+      ? { width: 190, height: 88, column: 244, row: 112 }
+      : { width: 230, height: 124, column: 294, row: 150 };
+  const nodes: PositionedGraphNode[] = [];
+  let nextLeaf = 0;
+
+  const place = (node: JourneyGraphNode, depth: number): number => {
+    const childYs = node.children.map((child) => place(child, depth + 1));
+    const y = childYs.length
+      ? childYs.reduce((sum, value) => sum + value, 0) / childYs.length
+      : 42 + nextLeaf++ * dimensions.row;
+    const height = node.kind === "open" ? Math.max(54, dimensions.height - 10) : dimensions.height;
+    nodes.push({ node, x: 44 + depth * dimensions.column, y, width: dimensions.width, height });
+    return y;
+  };
+
+  place(root, 0);
+  const maxRight = Math.max(...nodes.map((item) => item.x + item.width));
+  const maxBottom = Math.max(...nodes.map((item) => item.y + item.height));
+  return { nodes, width: Math.max(860, maxRight + 90), height: Math.max(560, maxBottom + 80), mobile: false };
+}
+
+function mobileGraphLayout(root: JourneyGraphNode, routeIds: Set<string>, density: GraphDensity): GraphLayout {
+  const canvasWidth = 356;
+  const nodeWidth = density === "overview" ? 132 : 154;
+  const nodeHeight = density === "detail" ? 112 : density === "topics" ? 82 : 58;
+  const rowGap = density === "detail" ? 154 : density === "topics" ? 126 : 100;
+  const nodes: PositionedGraphNode[] = [];
+  const positioned = new Set<string>();
+  let routeNode: JourneyGraphNode | undefined = root;
+  let row = 0;
+
+  nodes.push({ node: root, x: (canvasWidth - nodeWidth) / 2, y: 28, width: nodeWidth, height: nodeHeight });
+  positioned.add(root.id);
+
+  while (routeNode) {
+    const children = routeNode.children.slice(0, 2);
+    if (!children.length) break;
+    row += 1;
+    const childY = 28 + row * rowGap;
+    children.forEach((child, index) => {
+      const childWidth = nodeWidth;
+      const x = children.length === 1
+        ? (canvasWidth - childWidth) / 2
+        : index === 0 ? 10 : canvasWidth - childWidth - 10;
+      nodes.push({ node: child, x, y: childY, width: childWidth, height: child.kind === "open" ? Math.max(54, nodeHeight - 8) : nodeHeight });
+      positioned.add(child.id);
     });
+    routeNode = children.find((child) => routeIds.has(child.id) && child.kind === "turn");
+  }
+
+  const maxBottom = Math.max(...nodes.map((item) => item.y + item.height));
+  return { nodes: nodes.filter((item) => positioned.has(item.node.id)), width: canvasWidth, height: maxBottom + 88, mobile: true };
 }
 
 function JourneyMap({
@@ -1262,141 +1532,475 @@ function JourneyMap({
   onChoose: (turnId: string, optionId: string) => void;
 }) {
   const { t } = useI18n();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const responsiveInitializedRef = useRef(false);
+  const [density, setDensity] = useState<GraphDensity>("topics");
+  const [viewMode, setViewMode] = useState<GraphViewMode>("graph");
+  const [focusRootId, setFocusRootId] = useState<string | null>(null);
+  const [expandedBranches, setExpandedBranches] = useState<Set<string>>(() => new Set());
+  const [outlineExpanded, setOutlineExpanded] = useState<Set<string>>(() => new Set());
+  const [query, setQuery] = useState("");
+  const [openOnly, setOpenOnly] = useState(false);
+  const [scale, setScale] = useState(.86);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [pendingBranch, setPendingBranch] = useState<{ turnId: string; optionId: string } | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 720px)");
+    const update = () => {
+      setIsMobile(media.matches);
+      if (!responsiveInitializedRef.current) {
+        responsiveInitializedRef.current = true;
+        if (media.matches) setInspectorOpen(false);
+      }
+    };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const fullGraph = useMemo(() => buildJourneyGraph(journey), [journey]);
+  const turnIndex = useMemo(() => new Map(journey.turns.map((turn, index) => [turn.id, index + 1])), [journey.turns]);
   const activeTurn = journey.turns.find((turn) => turn.id === activeTurnId) ?? journey.turns[0];
-  const turnNumber = (turnId: string) => journey.turns.findIndex((turn) => turn.id === turnId) + 1;
-  const activePath = useMemo(() => {
-    const turnsById = new Map(journey.turns.map((turn) => [turn.id, turn]));
-    const path: JourneyTurn[] = [];
-    let cursor = turnsById.get(journey.currentTurnId);
-    while (cursor) {
-      path.push(cursor);
-      cursor = cursor.parentTurnId ? turnsById.get(cursor.parentTurnId) : undefined;
-    }
-    return path.reverse();
-  }, [journey.currentTurnId, journey.turns]);
-  const activePathIds = new Set(activePath.map((turn) => turn.id));
-  const branchTurns = journey.turns.filter((turn) => !activePathIds.has(turn.id));
-  const otherOpenPaths = journey.turns.flatMap((turn) =>
-    turn.id === activeTurn.id
-      ? []
-      : turn.options
-          .filter((option) => option.state === "proposed")
-          .map((option) => ({ option, turn })),
+  const focusRoot = focusRootId ? findGraphNode(fullGraph, focusRootId) ?? fullGraph : fullGraph;
+  const currentPath = useMemo(() => findGraphPath(fullGraph, journey.currentTurnId) ?? [fullGraph], [fullGraph, journey.currentTurnId]);
+  const currentPathIds = new Set(currentPath.map((node) => node.id));
+  const focusedCurrentPath = useMemo(() => findGraphPath(focusRoot, journey.currentTurnId) ?? [focusRoot], [focusRoot, journey.currentTurnId]);
+  const routeIds = useMemo(() => new Set(focusedCurrentPath.map((node) => node.id)), [focusedCurrentPath]);
+  const visibleGraph = useMemo(
+    () => visibleJourneyGraph(focusRoot, routeIds, density, isMobile, expandedBranches),
+    [density, expandedBranches, focusRoot, isMobile, routeIds],
   );
-  const selectedIsOffPath = !activePathIds.has(activeTurn.id);
+  const layout = useMemo(
+    () => isMobile ? mobileGraphLayout(visibleGraph, routeIds, density) : desktopGraphLayout(visibleGraph, density),
+    [density, isMobile, routeIds, visibleGraph],
+  );
+  const positionById = new Map(layout.nodes.map((item) => [item.node.id, item]));
+  const scaledWidth = isMobile ? layout.width : layout.width * scale;
+  const scaledHeight = isMobile ? layout.height : layout.height * scale;
+  const focusBreadcrumb = focusRootId ? findGraphPath(fullGraph, focusRootId) ?? [] : [];
+
+  const openRouteIds = useMemo(() => {
+    const ids = new Set<string>();
+    const collect = (node: JourneyGraphNode): boolean => {
+      const hasOpen = node.kind === "open" || node.children.some(collect);
+      if (hasOpen) ids.add(node.kind === "cluster" ? node.turn.id : node.id);
+      return hasOpen;
+    };
+    collect(fullGraph);
+    return ids;
+  }, [fullGraph]);
+
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const searchResults = useMemo(() => {
+    if (!normalizedQuery) return [];
+    return journey.turns.flatMap((turn) => {
+      const turnMatch = `${turn.question} ${turn.topicLabel} ${turn.answer}`.toLocaleLowerCase().includes(normalizedQuery)
+        ? [{ kind: "turn" as const, turn, option: null }]
+        : [];
+      const options = turn.options
+        .filter((option) => option.question.toLocaleLowerCase().includes(normalizedQuery))
+        .map((option) => ({ kind: "open" as const, turn, option }));
+      return [...turnMatch, ...options];
+    }).slice(0, 8);
+  }, [journey.turns, normalizedQuery]);
+  const matchingIds = new Set(searchResults.flatMap((result) => result.kind === "turn"
+    ? [result.turn.id]
+    : [`open:${result.turn.id}:${result.option?.id}`]));
+
+  const fitGraph = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || isMobile) return;
+    const nextScale = Math.max(.48, Math.min(1, (viewport.clientWidth - 28) / layout.width));
+    setScale(nextScale);
+    requestAnimationFrame(() => {
+      viewport.scrollTo({ left: 0, top: Math.max(0, (layout.height * nextScale - viewport.clientHeight) / 2), behavior: "smooth" });
+    });
+  }, [isMobile, layout.height, layout.width]);
+
+  const selectAndReveal = useCallback((turnId: string) => {
+    const path = findGraphPath(fullGraph, turnId) ?? [];
+    setExpandedBranches((current) => new Set([...current, ...path.map((node) => node.id)]));
+    onSelect(turnId);
+    setInspectorOpen(true);
+    requestAnimationFrame(() => {
+      const target = viewportRef.current?.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    });
+  }, [fullGraph, onSelect]);
+
+  function previewBranch(turnId: string, optionId: string) {
+    onSelect(turnId);
+    setPendingBranch({ turnId, optionId });
+    setInspectorOpen(true);
+  }
+
+  function graphConnector(parent: PositionedGraphNode, child: PositionedGraphNode) {
+    if (layout.mobile) {
+      const startX = parent.x + parent.width / 2;
+      const startY = parent.y + parent.height;
+      const endX = child.x + child.width / 2;
+      const endY = child.y;
+      const middle = startY + (endY - startY) / 2;
+      return `M ${startX} ${startY} V ${middle} H ${endX} V ${endY}`;
+    }
+    const startX = parent.x + parent.width;
+    const startY = parent.y + parent.height / 2;
+    const endX = child.x;
+    const endY = child.y + child.height / 2;
+    const middle = startX + (endX - startX) / 2;
+    return `M ${startX} ${startY} H ${middle} V ${endY} H ${endX}`;
+  }
+
+  function handleCanvasPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (isMobile || event.button !== 0 || (event.target as HTMLElement).closest("button, input, a")) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+    viewport.setPointerCapture(event.pointerId);
+    viewport.classList.add("panning");
+  }
+
+  function handleCanvasPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const pan = panRef.current;
+    const viewport = viewportRef.current;
+    if (!pan || !viewport || pan.pointerId !== event.pointerId) return;
+    viewport.scrollLeft = pan.left - (event.clientX - pan.x);
+    viewport.scrollTop = pan.top - (event.clientY - pan.y);
+  }
+
+  function endCanvasPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (panRef.current?.pointerId !== event.pointerId) return;
+    viewportRef.current?.classList.remove("panning");
+    panRef.current = null;
+  }
+
+  function handleOutlineKeys(event: KeyboardEvent<HTMLDivElement>) {
+    const targets = [...event.currentTarget.querySelectorAll<HTMLElement>("[data-outline-target]")].filter((item) => item.offsetParent !== null);
+    const index = targets.indexOf(document.activeElement as HTMLElement);
+    if (index < 0) return;
+    if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) event.preventDefault();
+    if (event.key === "ArrowDown") targets[Math.min(index + 1, targets.length - 1)]?.focus();
+    if (event.key === "ArrowUp") targets[Math.max(index - 1, 0)]?.focus();
+    if (event.key === "Home") targets[0]?.focus();
+    if (event.key === "End") targets.at(-1)?.focus();
+    const item = targets[index]?.closest<HTMLElement>("li[role='treeitem']");
+    const nodeId = targets[index]?.dataset.outlineNodeId;
+    if (event.key === "ArrowRight" && item?.getAttribute("aria-expanded") === "false" && nodeId) {
+      setOutlineExpanded((current) => new Set([...current, nodeId]));
+    } else if (event.key === "ArrowRight" && item?.getAttribute("aria-expanded") === "true") {
+      item.querySelector<HTMLElement>("ul [data-outline-target]")?.focus();
+    }
+    if (event.key === "ArrowLeft" && item?.getAttribute("aria-expanded") === "true" && nodeId && !routeIds.has(nodeId)) {
+      setOutlineExpanded((current) => { const next = new Set(current); next.delete(nodeId); return next; });
+    } else if (event.key === "ArrowLeft") {
+      item?.parentElement?.closest<HTMLElement>("li[role='treeitem']")?.querySelector<HTMLElement>("[data-outline-target]")?.focus();
+    }
+  }
+
+  const renderOutlineNode = (node: JourneyGraphNode, level = 1): React.ReactNode => {
+    const expanded = outlineExpanded.has(node.id) || routeIds.has(node.id);
+    if (node.kind === "open") {
+      return (
+        <li role="treeitem" aria-level={level} aria-selected={false} key={node.id} className="journey-outline-open">
+          <button type="button" data-outline-target onClick={() => previewBranch(node.turn.id, node.option?.id ?? "")}>
+            <span>{t("Open path")}</span><strong>{node.option?.question}</strong>
+          </button>
+        </li>
+      );
+    }
+    return (
+      <li role="treeitem" aria-level={level} aria-selected={activeTurnId === node.turn.id} aria-expanded={node.children.length ? expanded : undefined} key={node.id}>
+        <div className="journey-outline-row">
+          {node.children.length ? (
+            <button
+              type="button"
+              className="outline-expand"
+              aria-label={t(expanded ? "Collapse branch" : "Expand branch")}
+              onClick={() => setOutlineExpanded((current) => {
+                const next = new Set(current);
+                if (expanded) next.delete(node.id); else next.add(node.id);
+                return next;
+              })}
+            >{expanded ? <CaretDown aria-hidden="true" /> : <CaretRight aria-hidden="true" />}</button>
+          ) : <span className="outline-spacer" />}
+          <button
+            type="button"
+            data-outline-target
+            data-outline-node-id={node.id}
+            className={activeTurnId === node.turn.id ? "selected" : ""}
+            aria-current={journey.currentTurnId === node.turn.id ? "step" : undefined}
+            onClick={() => selectAndReveal(node.turn.id)}
+          >
+            <span>{t("Turn {number}", { number: turnIndex.get(node.turn.id) ?? 1 })} · {node.turn.topicLabel}</span>
+            <strong>{node.turn.question}</strong>
+            <small>{node.openCount ? t("{count} open questions", { count: node.openCount }) : t("Explored")}</small>
+          </button>
+        </div>
+        {expanded && node.children.length > 0 && <ul role="group">{node.children.map((child) => renderOutlineNode(child, level + 1))}</ul>}
+      </li>
+    );
+  };
+
+  const selectedParent = activeTurn.parentTurnId ? journey.turns.find((turn) => turn.id === activeTurn.parentTurnId) : null;
+  const selectedNode = findGraphNode(fullGraph, activeTurn.id);
+  const pendingOption = pendingBranch && pendingBranch.turnId === activeTurn.id
+    ? activeTurn.options.find((option) => option.id === pendingBranch.optionId)
+    : null;
 
   return (
-    <section className="map-view" aria-labelledby="map-title">
-      <header className="map-header">
+    <section className="map-view journey-tree-view" aria-labelledby="map-title">
+      <header className="map-header journey-tree-header">
         <div>
-          <p className="eyebrow"><span /> {t("Your journey")}</p>
+          <p className="eyebrow"><span /> {t("Journey tree")}</p>
           <h1 id="map-title">{journey.title}</h1>
-          <p>{t("Follow the path you took, revisit a turn, or open a question you left behind.")}</p>
+          <p>{t("See the whole exploration, follow your current route, or grow a new branch from any open question.")}</p>
         </div>
         <dl aria-label={t("Journey overview")}>
-          <div><dt>{t("Current")}</dt><dd>{activePath.length} / {journey.turnCount}</dd></div>
+          <div><dt>{t("Turns")}</dt><dd>{journey.turnCount}</dd></div>
           <div><dt>{t("Open paths")}</dt><dd>{journey.openBranchCount}</dd></div>
           <div><dt>{t("Sources")}</dt><dd>{journey.sourceCount}</dd></div>
         </dl>
       </header>
 
-      <section className="active-path" aria-labelledby="active-path-title">
-        <div className="map-section-heading">
-          <div><span>{t("Active path")}</span><h2 id="active-path-title">{t("How you got here")}</h2></div>
-          <p>{t("Choose any turn to see its two directions.")}</p>
-        </div>
-        <ol className="active-path-list">
-          {activePath.map((turn) => {
-            const current = turn.id === journey.currentTurnId;
-            const selected = turn.id === activeTurn.id;
-            return (
-              <li key={turn.id} className={selected ? "selected" : ""}>
+      <div className="journey-tree-controls" aria-label={t("Journey tree controls")}>
+        <div className="journey-tree-search">
+          <MagnifyingGlass aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            placeholder={t("Find a turn or open question")}
+            aria-label={t("Find a turn or open question")}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query && <button type="button" aria-label={t("Clear search")} onClick={() => setQuery("")}><X aria-hidden="true" /></button>}
+          {normalizedQuery && (
+            <div className="journey-tree-search-results">
+              <span>{t("{count} matches", { count: searchResults.length })}</span>
+              {searchResults.length ? searchResults.map((result) => (
                 <button
                   type="button"
-                  className="path-turn"
-                  aria-pressed={selected}
-                  aria-current={current ? "step" : undefined}
-                  onClick={() => onSelect(turn.id)}
+                  key={`${result.kind}-${result.turn.id}-${result.option?.id ?? "turn"}`}
+                  onClick={() => {
+                    setQuery("");
+                    if (result.option) previewBranch(result.turn.id, result.option.id);
+                    else selectAndReveal(result.turn.id);
+                  }}
                 >
-                  <span className="path-turn-number">{turnNumber(turn.id)}</span>
-                  <span className="path-turn-copy">
-                    <small>{turn.topicLabel}</small>
-                    <strong>{turn.question}</strong>
-                  </span>
-                  <span className={`path-turn-status ${current ? "current" : "explored"}`}>
-                    {t(current ? "You are here" : "Explored")}
-                  </span>
+                  <small>{result.option ? t("Open path") : `${t("Turn")} ${turnIndex.get(result.turn.id)}`}</small>
+                  <strong>{result.option?.question ?? result.turn.question}</strong>
                 </button>
+              )) : <p>{t("No matching turns yet.")}</p>}
+            </div>
+          )}
+        </div>
+        <div className="journey-tree-control-group density-control" aria-label={t("Detail level")}>
+          {(["overview", "topics", "detail"] as GraphDensity[]).map((level) => (
+            <button type="button" key={level} className={density === level ? "active" : ""} aria-pressed={density === level} onClick={() => setDensity(level)}>
+              {t(level === "overview" ? "Overview" : level === "topics" ? "Topics" : "Full cards")}
+            </button>
+          ))}
+        </div>
+        <div className="journey-tree-control-group">
+          <button type="button" className={openOnly ? "active" : ""} aria-pressed={openOnly} onClick={() => setOpenOnly((current) => !current)}><Path aria-hidden="true" /> {t("Open paths")}</button>
+          <button type="button" className={viewMode === "outline" ? "active" : ""} aria-pressed={viewMode === "outline"} onClick={() => setViewMode((current) => current === "graph" ? "outline" : "graph")}>
+            {viewMode === "graph" ? <ListBullets aria-hidden="true" /> : <TreeStructure aria-hidden="true" />} {t(viewMode === "graph" ? "Outline" : "Graph")}
+          </button>
+        </div>
+      </div>
+
+      {focusRootId && (
+        <nav className="journey-focus-bar" aria-label={t("Focused branch path")}>
+          <button type="button" onClick={() => { setFocusRootId(null); setPendingBranch(null); }}><ArrowLeft aria-hidden="true" /> {t("Full tree")}</button>
+          <ol>
+            {focusBreadcrumb.map((node, index) => (
+              <li key={node.id}>
+                <button type="button" onClick={() => index === 0 ? setFocusRootId(null) : setFocusRootId(node.id)}>{node.turn.topicLabel}</button>
               </li>
-            );
-          })}
-        </ol>
-      </section>
-
-      {selectedIsOffPath && (
-        <div className="off-path-notice" role="status">
-          <span>{t("Earlier branch")}</span>
-          <p>{t("This turn is outside your current path. Exploring an open question here creates a new visible branch.")}</p>
-        </div>
+            ))}
+          </ol>
+          <span>{t("Focused branch")}</span>
+        </nav>
       )}
 
-      <section className="selected-turn-paths" aria-labelledby="selected-paths-title">
-        <div className="selected-turn-heading">
-          <div>
-            <span>{t("Turn {number}", { number: turnNumber(activeTurn.id) })}</span>
-            <h2 id="selected-paths-title">{t("Where could this turn go?")}</h2>
-          </div>
-        </div>
-        <div className="selected-path-grid">
-          {activeTurn.options.map((option) => {
-            const open = option.state === "proposed";
-            return open ? (
-              <button
-                type="button"
-                className="selected-path-card open"
-                key={option.id}
-                onClick={() => onChoose(activeTurn.id, option.id)}
-              >
-                <span>{t("Option")} {option.position === 0 ? "A" : "B"} · {t("Open")}</span>
-                <strong>{option.question}</strong>
-                <small>{t("Explore this question")}</small>
-              </button>
-            ) : (
-              <div className={`selected-path-card ${option.state}`} key={option.id}>
-                <span>{t("Option")} {option.position === 0 ? "A" : "B"} · {t(option.state === "chosen" ? "path taken" : option.state)}</span>
-                <strong>{option.question}</strong>
-                <small>{t(option.state === "chosen" ? "This answer continues in the map above." : "This direction is no longer active.")}</small>
+      <div className={`journey-tree-workspace ${viewMode}`}>
+        {viewMode === "graph" ? (
+          <div className="journey-graph-shell">
+            <div className="journey-graph-statusbar">
+              <span><Crosshair aria-hidden="true" /> {t("Turn {number}", { number: turnIndex.get(journey.currentTurnId) ?? journey.turnCount })} · {t("You are here")}</span>
+              <span>{focusRootId ? t("Focused branch") : t("Whole tree")} · {t("{count} open questions", { count: journey.openBranchCount })}</span>
+            </div>
+            <div
+              className="journey-graph-viewport"
+              ref={viewportRef}
+              onPointerDown={handleCanvasPointerDown}
+              onPointerMove={handleCanvasPointerMove}
+              onPointerUp={endCanvasPan}
+              onPointerCancel={endCanvasPan}
+            >
+              <div className="journey-graph-scale-stage" style={{ width: scaledWidth, height: scaledHeight }}>
+                <div className="journey-graph-canvas" style={{ width: layout.width, height: layout.height, transform: isMobile ? undefined : `scale(${scale})` }}>
+                  <svg className="journey-graph-edges" width={layout.width} height={layout.height} aria-hidden="true">
+                    {layout.nodes.flatMap((parent) => parent.node.children.map((child) => {
+                      const childPosition = positionById.get(child.id);
+                      if (!childPosition) return null;
+                      const active = routeIds.has(parent.node.id) && routeIds.has(child.id);
+                      return <path key={`${parent.node.id}-${child.id}`} d={graphConnector(parent, childPosition)} className={`${active ? "active" : ""} ${child.kind === "open" ? "open" : ""}`} />;
+                    }))}
+                  </svg>
+                  {layout.nodes.map(({ node, x, y, width, height }) => {
+                    const realId = node.kind === "cluster" ? node.turn.id : node.id;
+                    const selected = node.turn.id === activeTurn.id && node.kind !== "open";
+                    const current = node.turn.id === journey.currentTurnId && node.kind === "turn";
+                    const active = routeIds.has(realId);
+                    const matched = matchingIds.has(node.id) || matchingIds.has(realId);
+                    const dimmed = (openOnly && !openRouteIds.has(realId) && node.kind !== "open") || (normalizedQuery.length > 0 && !matched);
+                    const preview = pendingBranch && node.kind === "open" && node.turn.id === pendingBranch.turnId && node.option?.id === pendingBranch.optionId;
+                    const className = ["journey-graph-node", node.kind, selected && "selected", current && "current", active && "active-route", matched && "match", dimmed && "dimmed", preview && "preview"].filter(Boolean).join(" ");
+                    if (node.kind === "cluster") {
+                      return (
+                        <button
+                          type="button"
+                          className={className}
+                          key={node.id}
+                          style={{ left: x, top: y, width, height }}
+                          aria-label={t("Expand {topic}: {turns} turns and {open} open questions", { topic: node.turn.topicLabel, turns: node.turnCount, open: node.openCount })}
+                          onClick={() => setExpandedBranches((currentSet) => new Set([...currentSet, node.turn.id]))}
+                        >
+                          <span className="journey-cluster-stack" aria-hidden="true" />
+                          <small>{node.turn.topicLabel}</small>
+                          <strong>{node.turnCount} {t("turns")} · {node.openCount} {t("open")}</strong>
+                          <Plus aria-hidden="true" />
+                        </button>
+                      );
+                    }
+                    if (node.kind === "open") {
+                      return (
+                        <button
+                          type="button"
+                          className={className}
+                          key={node.id}
+                          style={{ left: x, top: y, width, height }}
+                          aria-label={`${t("Open path")}: ${node.option?.question}`}
+                          onClick={() => previewBranch(node.turn.id, node.option?.id ?? "")}
+                        >
+                          <span className="journey-node-number">{preview ? <Plus aria-hidden="true" /> : (node.option?.position ?? 0) + 1}</span>
+                          <small>{preview ? t("New turn preview") : t("Open path")}</small>
+                          <strong>{node.option?.question}</strong>
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        type="button"
+                        className={className}
+                        key={node.id}
+                        data-turn-id={node.turn.id}
+                        style={{ left: x, top: y, width, height }}
+                        aria-pressed={selected}
+                        aria-current={current ? "step" : undefined}
+                        onClick={() => { onSelect(node.turn.id); setInspectorOpen(true); setPendingBranch(null); }}
+                      >
+                        <span className="journey-node-number">{turnIndex.get(node.turn.id)}</span>
+                        <small>{node.turn.topicLabel}</small>
+                        {density !== "overview" && <strong>{node.turn.question}</strong>}
+                        {density === "detail" && <p>{node.turn.answerBlocks[0]?.text ?? node.turn.answer}</p>}
+                        {current && <em>{t("You are here")}</em>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            );
-          })}
-        </div>
-        <button type="button" className="open-turn-answer" onClick={() => onContinue(activeTurn.id)}>
-          {t(activeTurn.id === journey.currentTurnId ? "Open full answer" : "Revisit this answer")}
-        </button>
-      </section>
-
-      {(otherOpenPaths.length > 0 || branchTurns.length > 0) && (
-        <details className="other-paths">
-          <summary>
-            <span>{t("Other paths")}</span>
-            <strong>{t("{count} open questions", { count: otherOpenPaths.length })}{branchTurns.length ? ` · ${t("{count} earlier branches", { count: branchTurns.length })}` : ""}</strong>
-          </summary>
-          <div className="other-path-groups">
-            {branchTurns.map((turn) => (
-              <button type="button" className="other-branch-turn" key={turn.id} onClick={() => onSelect(turn.id)}>
-                <span>{t("Earlier branch")} · {t("Turn {number}", { number: turnNumber(turn.id) })}</span>
-                <strong>{turn.question}</strong>
-              </button>
-            ))}
-            {otherOpenPaths.map(({ option, turn }) => (
-              <button type="button" className="other-open-path" key={option.id} onClick={() => onChoose(turn.id, option.id)}>
-                <span>{t("Open")} · {t("Turn {number}", { number: turnNumber(turn.id) })} · {turn.topicLabel}</span>
-                <strong>{option.question}</strong>
-              </button>
-            ))}
+              {!isMobile && (
+                <div className="journey-minimap" aria-hidden="true">
+                  {layout.nodes.map((item) => (
+                    <i
+                      key={item.node.id}
+                      className={`${routeIds.has(item.node.kind === "cluster" ? item.node.turn.id : item.node.id) ? "active" : ""} ${item.node.kind}`}
+                      style={{ left: `${item.x / layout.width * 100}%`, top: `${item.y / layout.height * 100}%` }}
+                    />
+                  ))}
+                  <span />
+                </div>
+              )}
+              {!isMobile && (
+                <div className="journey-zoom-controls" aria-label={t("Graph zoom controls")}>
+                  <button type="button" aria-label={t("Zoom out")} onClick={() => setScale((current) => Math.max(.48, current - .1))}><Minus aria-hidden="true" /></button>
+                  <button type="button" onClick={fitGraph}><CornersOut aria-hidden="true" /> {t("Fit all")}</button>
+                  <button type="button" aria-label={t("Zoom in")} onClick={() => setScale((current) => Math.min(1.35, current + .1))}><Plus aria-hidden="true" /></button>
+                  <output aria-label={t("Current zoom")}>{Math.round(scale * 100)}%</output>
+                </div>
+              )}
+              {isMobile && focusedCurrentPath.length > 3 && (
+                <button type="button" className="journey-offscreen-cue top" onClick={() => viewportRef.current?.scrollTo({ top: 0, behavior: "smooth" })}>
+                  {t("{count} ancestors above", { count: focusedCurrentPath.length - 2 })}
+                </button>
+              )}
+            </div>
           </div>
-        </details>
-      )}
+        ) : (
+          <div className="journey-outline" onKeyDown={handleOutlineKeys}>
+            <header><ListBullets aria-hidden="true" /><div><span>{t("Accessible outline")}</span><strong>{t("The same journey, in reading order")}</strong></div></header>
+            <ul role="tree" aria-label={t("Journey outline")}>{renderOutlineNode(focusRoot)}</ul>
+          </div>
+        )}
+
+        {inspectorOpen && (
+          <aside className={`journey-node-inspector ${pendingOption ? "confirming" : ""}`} aria-label={pendingOption ? t("Confirm new branch") : t("Selected turn details")}>
+            <div className="journey-inspector-handle" aria-hidden="true" />
+            <header>
+              <div>
+                <span>{pendingOption ? t("New branch preview") : t("Turn {number}", { number: turnIndex.get(activeTurn.id) ?? 1 })}</span>
+                <strong>{pendingOption?.question ?? activeTurn.topicLabel}</strong>
+              </div>
+              <button type="button" aria-label={t("Close details")} onClick={() => { setInspectorOpen(false); setPendingBranch(null); }}><X aria-hidden="true" /></button>
+            </header>
+            {pendingOption ? (
+              <div className="journey-branch-confirmation" role="dialog" aria-modal="false" aria-labelledby="branch-confirmation-title">
+                <p id="branch-confirmation-title">{t("This will grow a new child from Turn {number}.", { number: turnIndex.get(activeTurn.id) ?? 1 })}</p>
+                <ul>
+                  <li>{t("Your current route stays intact.")}</li>
+                  <li>{t("One live research turn will begin.")}</li>
+                  <li>{t("The result will appear at the previewed position in this tree.")}</li>
+                </ul>
+                <div>
+                  <button type="button" className="primary" onClick={() => { const branch = pendingBranch; setPendingBranch(null); if (branch) onChoose(branch.turnId, branch.optionId); }}>{t("Start research")}</button>
+                  <button type="button" onClick={() => setPendingBranch(null)}>{t("Keep exploring")}</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="journey-inspector-context">
+                  {selectedParent ? <button type="button" onClick={() => selectAndReveal(selectedParent.id)}><ArrowLeft aria-hidden="true" /> {selectedParent.topicLabel}</button> : <span>{t("Journey root")}</span>}
+                  <span>{currentPathIds.has(activeTurn.id) ? t("On current route") : t("Earlier branch")}</span>
+                </div>
+                <p className="journey-inspector-question">{activeTurn.question}</p>
+                <p className="journey-inspector-answer">{activeTurn.answerBlocks[0]?.text ?? activeTurn.answer}</p>
+                <div className="journey-inspector-actions">
+                  <button type="button" className="primary" onClick={() => onContinue(activeTurn.id)}>{t("Open full answer")}</button>
+                  <button type="button" onClick={() => { setFocusRootId(activeTurn.id); setPendingBranch(null); }}><Crosshair aria-hidden="true" /> {t("Focus branch")}</button>
+                  {selectedNode && expandedBranches.has(selectedNode.id) && !currentPathIds.has(selectedNode.id) && (
+                    <button type="button" onClick={() => setExpandedBranches((current) => { const next = new Set(current); next.delete(selectedNode.id); return next; })}>{t("Fold branch")}</button>
+                  )}
+                </div>
+                <div className="journey-inspector-directions">
+                  <span>{t("Two directions from here")}</span>
+                  {activeTurn.options.map((option) => {
+                    const action = journey.actions.find((item) => item.turnId === activeTurn.id && item.optionId === option.id && item.resultTurnId);
+                    const resultTurn = action?.resultTurnId ? journey.turns.find((turn) => turn.id === action.resultTurnId) : null;
+                    if (option.state === "proposed") {
+                      return <button type="button" className="open" key={option.id} onClick={() => previewBranch(activeTurn.id, option.id)}><small>{t("Option")} {option.position === 0 ? "A" : "B"} · {t("Open")}</small><strong>{option.question}</strong><em>{t("Preview branch")}</em></button>;
+                    }
+                    return <button type="button" key={option.id} disabled={!resultTurn} onClick={() => resultTurn && selectAndReveal(resultTurn.id)}><small>{t("Option")} {option.position === 0 ? "A" : "B"} · {t(option.state === "chosen" ? "path taken" : option.state)}</small><strong>{option.question}</strong><em>{resultTurn ? t("Show result") : t("Closed")}</em></button>;
+                  })}
+                </div>
+              </>
+            )}
+          </aside>
+        )}
+      </div>
     </section>
   );
 }
@@ -1433,7 +2037,7 @@ function Library({
   return (
     <section className="library-view" aria-labelledby="library-title">
       <header className="view-heading">
-        <div><p className="eyebrow"><span /> {t("Durable library / D1")}</p><h1 id="library-title">{t("Questions worth returning to.")}</h1></div>
+        <div><p className="eyebrow"><span /> {t("Saved journeys")}</p><h1 id="library-title">{t("Questions worth returning to.")}</h1></div>
         <div><p>{t("{count} of {limit} journeys saved", { count: journeys.length, limit: viewer?.journeyLimit ?? "—" })}</p><button type="button" className="compact-action" onClick={onNew}>{t("New drive +")}</button></div>
       </header>
       <div className="library-filters" aria-label={t("Library filters")}>
@@ -1542,6 +2146,106 @@ function ComparisonReport({ result }: { result: CompareResult }) {
       </div>
       <div className="observations"><span>{t("What the saved data shows")}</span><ul>{result.observations.map((observation, index) => <li key={`${observation.key}-${index}`}>{t(observation.key, observation.values)}</li>)}</ul></div>
       {!!result.confounders.length && <div className="confounders"><span>{t("Comparison cautions")}</span><ul>{result.confounders.map((item, index) => <li key={`${item.key}-${index}`}>{t(item.key, item.values)}</li>)}</ul></div>}
+    </section>
+  );
+}
+
+function UsageView({
+  usage,
+  viewer,
+  loading,
+  error,
+  onRefresh,
+  onOpenLibrary,
+}: {
+  usage: UsageSummary | null;
+  viewer: Viewer | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onOpenLibrary: () => void;
+}) {
+  const { t, locale } = useI18n();
+  const time = (value: number) => new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value);
+
+  return (
+    <section className="usage-view" aria-labelledby="usage-title">
+      <header className="view-heading">
+        <div><p className="eyebrow"><span /> {t("Rolling usage / 24 hours")}</p><h1 id="usage-title">{t("Know what is available.")}</h1></div>
+        <div>
+          <p>{usage ? t("{count} research runs ready", { count: usage.liveResearch.remaining }) : t("Reading your usage…")}</p>
+          <span>{t("Every run returns exactly 24 hours after it starts.")}</span>
+        </div>
+      </header>
+
+      {error ? (
+        <div className="usage-load-error" role="alert"><p>{error}</p><button type="button" onClick={onRefresh}>{t("Try again")}</button></div>
+      ) : loading && !usage ? (
+        <div className="usage-loading" role="status">{t("Reading your rolling limits…")}</div>
+      ) : usage ? (
+        <div className="usage-ledger">
+          <article className="usage-primary">
+            <header><span>{t("Live research")}</span><strong>{usage.liveResearch.used}<i>/</i>{usage.liveResearch.limit}</strong></header>
+            <progress value={usage.liveResearch.used} max={usage.liveResearch.limit} aria-label={t("Live research used in the last 24 hours")} />
+            <div className="usage-primary-copy">
+              <p>{t("{count} runs are available now.", { count: usage.liveResearch.remaining })}</p>
+              {usage.liveResearch.nextSlotAt ? (
+                <span>{t("Next slot returns {time}.", { time: time(usage.liveResearch.nextSlotAt) })}</span>
+              ) : (
+                <span>{t("You have not reached the rolling run limit.")}</span>
+              )}
+            </div>
+            {!!usage.liveResearch.releasesAt.length && (
+              <div className="usage-release-list">
+                <span>{t("Upcoming slot returns")}</span>
+                <ol>
+                  {usage.liveResearch.releasesAt.slice(0, 5).map((releaseAt, index) => (
+                    <li key={`${releaseAt}-${index}`}><b>+1</b><time dateTime={new Date(releaseAt).toISOString()}>{time(releaseAt)}</time></li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </article>
+
+          <article className="usage-secondary spend">
+            <span>{t("Rolling provider spend")}</span>
+            <strong>${usage.spend.usedUsd.toFixed(3)} <i>/ ${usage.spend.limitUsd.toFixed(2)}</i></strong>
+            <progress value={usage.spend.usedUsd} max={usage.spend.limitUsd} aria-label={t("Provider spend used in the last 24 hours")} />
+            <p>{usage.spend.nextReleaseAt
+              ? t("Spend begins leaving the window {time}.", { time: time(usage.spend.nextReleaseAt) })
+              : t("No metered provider spend in the current window.")}</p>
+          </article>
+
+          <article className="usage-secondary library-capacity">
+            <span>{t("Saved journeys")}</span>
+            <strong>{usage.library.used} <i>/ {usage.library.limit}</i></strong>
+            <progress value={usage.library.used} max={usage.library.limit} aria-label={t("Saved journey capacity used")} />
+            <p>{t("This capacity does not reset every 24 hours. Delete a journey to free a place.")}</p>
+            <button type="button" onClick={onOpenLibrary}>{t("Manage saved journeys")}</button>
+          </article>
+
+          <aside className="usage-window-note">
+            <div><span>{t("How rolling limits work")}</span><p>{t("There is no midnight reset. Each run and each dollar leaves the window 24 hours after it was recorded.")}</p></div>
+            {viewer?.mode === "guest" ? (
+              <div>
+                <span>{t("Guest session")}</span>
+                <p>{usage.guestSessionExpiresAt
+                  ? t("This browser session is scheduled to remain available until {time}.", { time: time(usage.guestSessionExpiresAt) })
+                  : t("This library belongs to this browser session.")}</p>
+                <a href="/signin-with-chatgpt?return_to=%2F">{t("Sign in to keep more across devices")} →</a>
+              </div>
+            ) : (
+              <div><span>{t("Account usage")}</span><p>{t("These limits follow your signed-in ChatGPT identity across devices.")}</p></div>
+            )}
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -5,6 +5,7 @@ import { isRecord } from "./openai";
 
 export type ProviderOperation =
   | "live_research"
+  | "image_note_repair"
   | "citation_repair"
   | "citation_recovery"
   | "starter_generation"

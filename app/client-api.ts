@@ -19,10 +19,22 @@ export type LiveResearchState = {
   status: "running" | "complete" | "error";
   result: JourneyDetail | null;
   error: string | null;
+  errorCode: ApiFailure["error"]["code"] | null;
   diagnosticId: string | null;
   retryAttempt: number;
   maxRetries: number;
 };
+
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly code: ApiFailure["error"]["code"],
+    public readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
 
 export function starterRecommendationsUrl(performerId: PerformerId, forceRefresh = false) {
   const query = new URLSearchParams({ performer: performerId });
@@ -37,7 +49,10 @@ export async function api<T>(url: string, init?: RequestInit): Promise<ApiSucces
   });
   const payload = (await response.json()) as ApiSuccess<T> | ApiFailure;
   if (!response.ok || "error" in payload) {
-    throw new Error("error" in payload ? payload.error.message : "The request failed.");
+    if ("error" in payload) {
+      throw new ApiRequestError(payload.error.message, payload.error.code, payload.error.retryable);
+    }
+    throw new Error("The request failed.");
   }
   return payload;
 }
@@ -53,7 +68,11 @@ export async function streamLiveResearch(
   });
   if (!response.ok) {
     const payload = (await response.json()) as ApiFailure;
-    throw new Error(payload.error?.message ?? "Live research could not start.");
+    throw new ApiRequestError(
+      payload.error?.message ?? "Live research could not start.",
+      payload.error?.code ?? "INTERNAL_ERROR",
+      payload.error?.retryable ?? true,
+    );
   }
   if (!response.body) throw new Error("Live research did not return a readable stream.");
 
@@ -103,8 +122,9 @@ export async function streamLiveResearch(
           setState((current) => current && {
             ...current,
             diagnosticId: event.error.diagnosticId ?? current.diagnosticId,
+            errorCode: event.error.code,
           });
-          throw new Error(event.error.message);
+          throw new ApiRequestError(event.error.message, event.error.code, event.error.retryable);
         } else if (event.type === "complete") {
           complete = event;
         }
@@ -120,4 +140,8 @@ export async function streamLiveResearch(
 
 export function messageFrom(cause: unknown): string {
   return cause instanceof Error ? cause.message : "WonderDrive could not complete that request.";
+}
+
+export function errorCodeFrom(cause: unknown): ApiFailure["error"]["code"] | null {
+  return cause instanceof ApiRequestError ? cause.code : null;
 }

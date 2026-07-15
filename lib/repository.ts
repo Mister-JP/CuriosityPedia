@@ -186,9 +186,7 @@ export async function createJourney(
   if ((count?.count ?? 0) >= viewer.journeyLimit) {
     throw new RepositoryError(
       "JOURNEY_LIMIT",
-      viewer.mode === "guest"
-        ? `Guest mode keeps up to ${viewer.journeyLimit} journeys. Sign in with ChatGPT to keep more.`
-        : `Your library currently keeps up to ${viewer.journeyLimit} journeys.`,
+      `Your saved-journey library is full (${count?.count ?? viewer.journeyLimit}/${viewer.journeyLimit}). Delete one journey to make room.`,
       409,
     );
   }

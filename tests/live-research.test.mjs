@@ -139,6 +139,171 @@ test("extracts image search results into a graceful media gallery", () => {
   assert.ok(mapped.sources.some((source) => source.relation === "image"));
 });
 
+test("keeps provider images visible when the user prefers images but visual notes are unavailable", () => {
+  const images = liveResearchTestHooks.extractImages({
+    output: [{
+      type: "web_search_call",
+      results: [{
+        type: "image_result",
+        image_url: "https://images.example.org/bridge.jpg",
+        thumbnail_url: "https://images.example.org/bridge-thumb.jpg",
+        source_website_url: "https://example.org/bridge",
+        caption: "Golden Gate Bridge at sunset from the shoreline.",
+      }],
+    }],
+  });
+
+  const preferred = liveResearchTestHooks.validateAndMapTurn(
+    validTurn,
+    liveResearchTestHooks.extractSources(providerResponse),
+    "prefer",
+    images,
+  );
+  const optional = liveResearchTestHooks.validateAndMapTurn(
+    validTurn,
+    liveResearchTestHooks.extractSources(providerResponse),
+    "when-useful",
+    images,
+  );
+
+  assert.equal(preferred.media.length, 1);
+  assert.equal(preferred.media[0].imageUrl, "https://images.example.org/bridge.jpg");
+  assert.equal(preferred.media[0].caption, "Golden Gate Bridge at sunset from the shoreline.");
+  assert.equal(optional.media.length, 0);
+});
+
+test("treats an explicit photograph request as an image preference", () => {
+  assert.equal(
+    liveResearchTestHooks.imagePreferenceForQuestion("when-useful", "Find recent factual photographs of the Golden Gate Bridge."),
+    "prefer",
+  );
+  assert.equal(
+    liveResearchTestHooks.imagePreferenceForQuestion("when-useful", "How do suspension bridges carry weight?"),
+    "when-useful",
+  );
+  assert.equal(
+    liveResearchTestHooks.imagePreferenceForQuestion("avoid", "Show me photos of the bridge."),
+    "avoid",
+  );
+});
+
+test("repairs mismatched model image URLs with server-owned provider image IDs", () => {
+  const images = liveResearchTestHooks.extractImages({
+    output: [{
+      type: "web_search_call",
+      results: [{
+        type: "image_result",
+        image_url: "https://images.example.org/bridge.jpg",
+        thumbnail_url: "https://images.example.org/bridge-thumb.jpg",
+        source_website_url: "https://example.org/provider-bridge-page",
+        caption: "A suspension bridge showing its main cables.",
+      }],
+    }],
+  });
+  const mismatched = structuredClone(validTurn);
+  mismatched.visualNotes = [{
+    sourcePageUrl: "https://different.example.net/model-selected-page",
+    title: "Main cables of a suspension bridge",
+    role: "process",
+    whyIncluded: "This bridge photograph makes the load-carrying cable system visible, connecting the answer's structural explanation to a specific physical example.",
+    whatToNotice: [
+      "Vertical suspenders connect the roadway deck to the curving main cables.",
+      "The main cables pass over towers before descending toward distant anchorages.",
+    ],
+    learning: "A suspension bridge carries roadway weight through suspenders and main cables, then transfers those forces into towers and anchorages.",
+    evidenceRelation: "illustrates",
+  }];
+
+  const repaired = liveResearchTestHooks.applyImageNoteRepair(mismatched, images, {
+    notes: [{
+      imageId: "I1",
+      noteNumber: 1,
+      title: mismatched.visualNotes[0].title,
+      role: mismatched.visualNotes[0].role,
+      whyIncluded: mismatched.visualNotes[0].whyIncluded,
+      whatToNotice: mismatched.visualNotes[0].whatToNotice,
+      learning: mismatched.visualNotes[0].learning,
+      evidenceRelation: mismatched.visualNotes[0].evidenceRelation,
+    }],
+  });
+  const mapped = liveResearchTestHooks.validateAndMapTurn(
+    repaired,
+    liveResearchTestHooks.extractSources(providerResponse),
+    "prefer",
+    images,
+  );
+
+  assert.equal(repaired.visualNotes[0].sourcePageUrl, "https://example.org/provider-bridge-page");
+  assert.equal(mapped.media.length, 1);
+  assert.equal(mapped.media[0].imageUrl, "https://images.example.org/bridge.jpg");
+});
+
+test("repairs a provider image URL when the host and page slug strongly overlap", () => {
+  const images = [{
+    imageUrl: "https://cdn.example.org/tour.jpg",
+    sourcePageUrl: "https://www.dylanstours.com/tours/open-air-city-tour-alcatraz/",
+    caption: "Golden Gate Bridge at sunset during an open-air city tour.",
+  }];
+  const turn = structuredClone(validTurn);
+  turn.visualNotes = [{
+    sourcePageUrl: "https://dylanstours.com/open-air-city-tour-alcatraz/",
+    title: "Golden Gate Bridge glowing above the bay",
+    role: "context",
+    whyIncluded: "The sunset photograph shows the bridge's orange structure holding its color while warmer light spreads across the surrounding bay and sky.",
+    whatToNotice: [
+      "The orange bridge remains distinct against the softer sunset colors.",
+      "Reflected light breaks into smaller patches across the moving water.",
+    ],
+    learning: "The bridge remains visually prominent because its saturated orange paint contrasts with changing atmospheric light, distant water, and the evening sky.",
+    evidenceRelation: "illustrates",
+  }];
+
+  const repaired = liveResearchTestHooks.repairImageNotesBySourcePath(turn, images, "en");
+  const mapped = liveResearchTestHooks.validateAndMapTurn(
+    repaired,
+    liveResearchTestHooks.extractSources(providerResponse),
+    "prefer",
+    images,
+  );
+
+  assert.equal(repaired.visualNotes[0].sourcePageUrl, images[0].sourcePageUrl);
+  assert.equal(mapped.media.length, 1);
+});
+
+test("rejects duplicate image-note repair assignments", () => {
+  const images = [
+    { imageUrl: "https://images.example.org/one.jpg", sourcePageUrl: "https://example.org/one", caption: "Bridge cables" },
+    { imageUrl: "https://images.example.org/two.jpg", sourcePageUrl: "https://example.org/two", caption: "Bridge tower" },
+  ];
+  const turn = structuredClone(validTurn);
+  turn.visualNotes = [
+    { sourcePageUrl: "https://wrong.example/a", title: "Bridge cables", role: "object", whyIncluded: "one", whatToNotice: ["one", "two"], learning: "one", evidenceRelation: "shows" },
+    { sourcePageUrl: "https://wrong.example/b", title: "Bridge tower", role: "object", whyIncluded: "two", whatToNotice: ["one", "two"], learning: "two", evidenceRelation: "shows" },
+  ];
+
+  assert.throws(
+    () => liveResearchTestHooks.applyImageNoteRepair(turn, images, {
+      notes: [
+        {
+          imageId: "I1", noteNumber: 1, title: "Bridge cables", role: "object",
+          whyIncluded: "This bridge image clearly shows the cable system carrying roadway loads toward the towers and distant anchorages in a visible example.",
+          whatToNotice: ["Vertical suspenders connect the roadway directly to curving main cables.", "Main cables pass over towers before descending toward the anchorages."],
+          learning: "Suspension bridges transfer roadway weight through vertical suspenders and main cables before towers and anchorages carry those forces into the ground.",
+          evidenceRelation: "shows",
+        },
+        {
+          imageId: "I1", noteNumber: 2, title: "Bridge tower", role: "object",
+          whyIncluded: "This bridge image clearly shows the tower supporting cables above the roadway and organizing the structure into a visible load path.",
+          whatToNotice: ["The tower rises above the roadway and supports both main cables.", "Suspender cables descend toward the deck on both tower sides."],
+          learning: "A suspension bridge tower redirects cable forces downward while keeping the main span elevated above the water or landscape below.",
+          evidenceRelation: "shows",
+        },
+      ],
+    }),
+    (error) => error?.code === "SCHEMA_INVALID",
+  );
+});
+
 test("accepts only citations that belong to the provider source set", () => {
   const sources = liveResearchTestHooks.extractSources(providerResponse);
   const mapped = liveResearchTestHooks.validateAndMapTurn(validTurn, sources);

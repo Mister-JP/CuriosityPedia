@@ -72,3 +72,84 @@ No actionable P0, P1, or P2 issues remain.
 - `node --experimental-loader ./tests/cloudflare-loader.mjs --import tsx --test tests/live-research.test.mjs`: passed, 15 tests.
 
 final result: passed
+
+---
+
+# Journey tree implementation design QA
+
+## Comparison target
+
+- Desktop source truth: `design/journey-graph-vision/01-whole-tree-overview.png`
+- Mobile source truth: `design/journey-graph-vision/mobile-v2/01-vertical-tree-overview.png`
+- Desktop implementation: `artifacts/journey-map-implementation/15-tree-desktop.png`
+- Mobile implementation: `artifacts/journey-map-implementation/18-tree-mobile-final.png`
+- Desktop combined comparison: `artifacts/journey-map-implementation/20-tree-desktop-comparison.png`
+- Mobile combined comparison: `artifacts/journey-map-implementation/21-tree-mobile-comparison.png`
+- Viewports: 1440 × 1000 desktop and 390 × 844 mobile
+- State: five-turn saved journey, current route selected, open questions visible, Topics density
+
+## Full-view comparison evidence
+
+The implementation preserves the approved information model: one directed graph, a visually dominant current route, open questions attached to their true parent, semantic detail controls, selection details, a minimap on desktop, and a top-to-bottom mobile hierarchy. The live fixture contains different content and a different branch shape than the concept board; structure and interaction behavior are the comparison targets.
+
+The mobile viewport reports `scrollWidth` equal to `clientWidth` (375 CSS px inside the 390 px browser viewport). Every rendered graph node remained between 20 and 356 CSS px, so no node or action requires horizontal panning.
+
+## Focused-region evidence
+
+The mobile comparison focuses on the graph viewport and confirms that depth moves downward, two-child rows fit within the screen, and the current route stays visually stronger. Browser measurements confirmed the selected-turn sheet is fixed to the bottom of the 844 px viewport (`top: 484`, `bottom: 844`) and the branch-confirmation sheet remains bottom anchored (`top: 568`, `bottom: 844`).
+
+## Required fidelity surfaces
+
+- Typography: existing WonderDrive Newsreader and IBM Plex Sans families, optical hierarchy, compact metadata, and localized scripts are preserved.
+- Spacing and layout: desktop keeps the graph and inspector in stable adjacent regions; mobile uses the full width, vertical depth, two bounded columns, and no horizontal overflow.
+- Colors and tokens: implementation uses the existing paper, ink, acid, sky, coral, line, and muted tokens. Current, selected, open, preview, dimmed, and focused states remain distinguishable without color alone.
+- Image and asset quality: the graph contains no required photographic assets. All controls use the project’s existing Phosphor icon library; no placeholder icons remain.
+- Copy and content: graph vocabulary is included across all ten non-English locale catalogs with placeholder parity.
+- Accessibility: the outline exposes tree/treeitem semantics, expanded and selected state, Up/Down/Home/End/Left/Right navigation, full-card touch targets, accessible labels, and a non-spatial equivalent for every graph branch.
+
+## Interaction and browser verification
+
+- Graph and Outline views switch without losing selection.
+- Overview, Topics, and Full cards change information density while preserving hierarchy.
+- Search returns matching turns and open questions.
+- Open-path mode preserves the graph and dims unrelated nodes.
+- Focus branch adds breadcrumbs and a persistent Full tree return action.
+- Selecting a graph node opens the desktop inspector or mobile bottom sheet.
+- Choosing an open path creates a ghost node and confirmation sheet before live research.
+- Canceling confirmation leaves the route unchanged.
+- Desktop zoom, Fit all, and minimap are present.
+- Mobile graph has no horizontal overflow at 390 × 844.
+- Browser console errors and warnings checked: none.
+
+## Comparison history
+
+### Iteration 1
+
+- [P1] The previous mobile design inherited horizontal graph growth and would push descendants off-screen.
+- Fix: mobile uses a top-to-bottom route layout, bounds each level to two columns, and folds distant off-route subtrees into attached branch piles.
+- Post-fix evidence: `18-tree-mobile-final.png` and `21-tree-mobile-comparison.png`.
+
+### Iteration 2
+
+- [P2] A sticky selected-turn inspector appeared too late in the mobile document instead of behaving like the approved partial sheet.
+- Fix: mobile starts with an unobstructed graph; selecting a node opens a fixed, dismissible bottom sheet while the parent and children remain behind it.
+- Post-fix evidence: browser geometry measurements at 390 × 844 and successful mobile selection/confirmation interaction tests.
+
+### Iteration 3
+
+- [P1] The first full test pass found the new graph vocabulary missing from non-English locale catalogs.
+- Fix: added graph-specific translations for Spanish, French, German, Portuguese, Hindi, Bengali, Arabic, Simplified Chinese, Japanese, and Korean with exact placeholder parity.
+- Post-fix evidence: complete `npm test` pass, including localization completeness.
+
+## Findings
+
+No actionable P0, P1, or P2 issues remain. The implementation intentionally uses real saved-journey content rather than the concept’s illustrative city-memory fixture.
+
+## Validation
+
+- `npm run typecheck`: passed.
+- `npm run lint`: passed with two pre-existing generator-script warnings outside the runtime implementation.
+- `npm test`: passed, 39 tests.
+- Desktop and 390 × 844 mobile browser verification: passed.
+
+final result: passed

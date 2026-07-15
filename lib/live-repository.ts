@@ -26,6 +26,7 @@ import {
 } from "./request";
 import { optionStatements } from "./turn-options";
 import { normalizeLocale } from "./i18n";
+import { identitySpendLimitUsd, liveResearchLimit, ROLLING_USAGE_WINDOW_MS } from "./usage-policy";
 
 const PRESETS: ResearchPreset[] = ["spark", "standard", "deep"];
 
@@ -110,7 +111,7 @@ export async function prepareLiveResearch(
     )
     .bind(viewer.identityId, now - 86_400_000)
     .first<{ project_spend: number; identity_spend: number }>();
-  const identityBudgetUsd = viewer.mode === "guest" ? 1 : 5;
+  const identityBudgetUsd = identitySpendLimitUsd(viewer.mode);
   if ((spend?.project_spend ?? 0) >= projectBudgetUsd * 1_000_000) {
     throw new RepositoryError(
       "BUDGET_EXCEEDED",
@@ -128,14 +129,14 @@ export async function prepareLiveResearch(
     );
   }
 
-  const liveLimit = viewer.mode === "guest" ? 4 : 20;
+  const liveLimit = liveResearchLimit(viewer.mode);
   const recent = await db
     .prepare(
       `SELECT COUNT(*) AS count FROM research_requests
        WHERE identity_id = ? AND created_at >= ?
          AND status IN ('reserved', 'researching', 'committed')`,
     )
-    .bind(viewer.identityId, Date.now() - 86_400_000)
+    .bind(viewer.identityId, Date.now() - ROLLING_USAGE_WINDOW_MS)
     .first<{ count: number }>();
   if ((recent?.count ?? 0) >= liveLimit) {
     throw new RepositoryError(
@@ -797,7 +798,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
     if ((count?.count ?? 0) >= viewer.journeyLimit) {
       throw new RepositoryError(
         "JOURNEY_LIMIT",
-        `This library currently keeps up to ${viewer.journeyLimit} journeys.`,
+        `Your saved-journey library is full (${count?.count ?? viewer.journeyLimit}/${viewer.journeyLimit}). Delete one journey to make room.`,
         409,
       );
     }

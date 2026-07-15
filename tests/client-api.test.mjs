@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { starterRecommendationsUrl, streamLiveResearch } from "../app/client-api.ts";
+import { api, starterRecommendationsUrl, streamLiveResearch } from "../app/client-api.ts";
 
 test("starter recommendations use cache unless a person explicitly refreshes", () => {
   assert.equal(starterRecommendationsUrl("sage"), "/api/starters?performer=sage");
@@ -34,6 +34,7 @@ test("live research makes automatic retries visible and clears stale activity", 
     status: "running",
     result: null,
     error: null,
+    errorCode: null,
     diagnosticId: null,
     retryAttempt: 0,
     maxRetries: 0,
@@ -49,4 +50,21 @@ test("live research makes automatic retries visible and clears stale activity", 
   assert.equal(state.retryAttempt, 1);
   assert.equal(state.maxRetries, 5);
   assert.deepEqual(state.events, []);
+});
+
+test("client API preserves quota error codes for targeted recovery", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => Response.json({
+    error: {
+      code: "LIVE_RESEARCH_LIMIT",
+      message: "The rolling live research limit is reached.",
+      retryable: true,
+    },
+  }, { status: 429 });
+
+  await assert.rejects(
+    () => api("/api/usage"),
+    (error) => error?.code === "LIVE_RESEARCH_LIMIT" && error?.retryable === true,
+  );
 });

@@ -3,13 +3,23 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import type { SupportedLocale } from "../lib/contracts";
 import { localeDirection } from "../lib/i18n";
+import ar from "./locales/ar";
+import bn from "./locales/bn";
+import de from "./locales/de";
+import fr from "./locales/fr";
+import hi from "./locales/hi";
+import ja from "./locales/ja";
+import ko from "./locales/ko";
+import pt from "./locales/pt";
+import zhCN from "./locales/zh-CN";
+import { journeyTreeMessages } from "./locales/journey-tree";
 
 type Values = Record<string, string | number>;
 type Translator = (key: string, values?: Values) => string;
 
 const translations: Record<Exclude<SupportedLocale, "en">, Record<string, string>> = {
   es: {
-    "New drive": "Nueva ruta", Library: "Biblioteca", Compare: "Comparar", Settings: "Ajustes",
+    "New drive": "Nueva ruta", Library: "Biblioteca", Compare: "Comparar", Usage: "Uso", Settings: "Ajustes",
     "curiosity, performed": "curiosidad, en escena", "WonderDrive views": "Vistas de WonderDrive",
     "ChatGPT account": "Cuenta de ChatGPT", "Opening library…": "Abriendo biblioteca…", "{count}/{limit} saved": "{count}/{limit} guardadas", "durable session": "sesión duradera",
     "Sign in": "Iniciar sesión", "Sign out": "Cerrar sesión", "Research first": "Investigar primero", "Your guest library is still separate.": "Tu biblioteca de invitado sigue separada.", Reconnect: "Reconectar", Dismiss: "Descartar",
@@ -30,6 +40,15 @@ const translations: Record<Exclude<SupportedLocale, "en">, Record<string, string
     "Audience controls": "Controles de audiencia", "Make the stage comfortable.": "Haz cómodo el escenario.", "Synced to your ChatGPT identity": "Sincronizado con tu identidad de ChatGPT", "Saved to this guest session": "Guardado en esta sesión de invitado", "These preferences change presentation and future turns, never evidence.": "Estas preferencias cambian la presentación y los turnos futuros, nunca la evidencia.", "Experience language": "Idioma de la experiencia", "Changes the whole interface and future learning output.": "Cambia toda la interfaz y el contenido futuro.", "Default answer density": "Densidad predeterminada", Brief: "Breve", Balanced: "Equilibrada", Rich: "Detallada", "Separate from how deeply WonderDrive researches.": "Independiente de la profundidad de investigación.", "Text size": "Tamaño del texto", Small: "Pequeño", Medium: "Mediano", Large: "Grande", "Extra large": "Muy grande", "Factual images": "Imágenes factuales", Avoid: "Evitar", "When useful": "Cuando sean útiles", "Prefer when supported": "Preferir con evidencia", "Decorative imagery is never substituted for factual media.": "Las imágenes decorativas nunca sustituyen evidencia visual.", "Read-aloud speed: {rate}×": "Velocidad de lectura: {rate}×", "Reduce interface motion": "Reducir movimiento", "Saving…": "Guardando…", "Save preferences": "Guardar preferencias",
     "Opening your WonderDrive library…": "Abriendo tu biblioteca de WonderDrive…", "Resolving a durable guest identity": "Preparando una identidad de invitado", "Open the journey library": "Abrir la biblioteca", "No journey is on stage.": "No hay ningún recorrido en escena.", "Start a new question or return to one you have already saved.": "Inicia una pregunta nueva o vuelve a una ya guardada.",
   },
+  fr,
+  de,
+  pt,
+  hi,
+  bn,
+  ar,
+  "zh-CN": zhCN,
+  ja,
+  ko,
 };
 
 Object.assign(translations.es, {
@@ -75,7 +94,22 @@ Object.assign(translations.es, {
   "Makes hidden mechanisms legible through concrete parts, forces, feedback, and failure modes.": "Hace comprensibles los mecanismos ocultos mediante piezas, fuerzas, retroalimentación y fallos concretos.",
   patient: "paciente", warm: "cálido", precise: "preciso", playful: "juguetón", nimble: "ágil", vivid: "vívido", "clear-eyed": "lúcido", tactile: "táctil", structured: "estructurado",
   instant: "instantáneo", fast: "rápido", balanced: "equilibrado", deliberate: "deliberado",
+  "Your saved-journey library is full ({count}/{limit}). Delete one journey to make room.": "Tu biblioteca de recorridos está llena ({count}/{limit}). Elimina uno para liberar espacio.",
+  "Manage saved journeys": "Gestionar recorridos guardados", "View usage": "Ver uso", "Library full": "Biblioteca llena", "Usage limit reached": "Límite de uso alcanzado", "No research was started": "No se inició ninguna investigación",
+  "Your saved-journey library is full": "Tu biblioteca de recorridos está llena", "Your rolling usage limit is reached": "Alcanzaste tu límite de uso móvil",
+  "Rolling usage / 24 hours": "Uso móvil / 24 horas", "Know what is available.": "Descubre qué tienes disponible.", "{count} research runs ready": "{count} investigaciones disponibles", "Reading your usage…": "Consultando tu uso…", "Every run returns exactly 24 hours after it starts.": "Cada uso vuelve exactamente 24 horas después de comenzar.",
+  "Try again": "Intentar de nuevo", "Reading your rolling limits…": "Consultando tus límites móviles…", "Live research": "Investigación en vivo", "Live research used in the last 24 hours": "Investigaciones usadas en las últimas 24 horas", "{count} runs are available now.": "Hay {count} investigaciones disponibles ahora.", "Next slot returns {time}.": "El próximo cupo vuelve {time}.", "You have not reached the rolling run limit.": "Aún no alcanzaste el límite móvil de investigaciones.", "Upcoming slot returns": "Próximos cupos disponibles",
+  "Rolling provider spend": "Gasto móvil del proveedor", "Provider spend used in the last 24 hours": "Gasto del proveedor en las últimas 24 horas", "Spend begins leaving the window {time}.": "El gasto comienza a salir del período {time}.", "No metered provider spend in the current window.": "No hay gasto medido en el período actual.",
+  "Saved journeys": "Recorridos guardados", "Saved journey capacity used": "Capacidad de recorridos utilizada", "This capacity does not reset every 24 hours. Delete a journey to free a place.": "Esta capacidad no se reinicia cada 24 horas. Elimina un recorrido para liberar un lugar.",
+  "How rolling limits work": "Cómo funcionan los límites móviles", "There is no midnight reset. Each run and each dollar leaves the window 24 hours after it was recorded.": "No hay reinicio a medianoche. Cada investigación y cada dólar salen del período 24 horas después de registrarse.",
+  "Guest session": "Sesión de invitado", "This browser session is scheduled to remain available until {time}.": "Esta sesión del navegador está prevista hasta {time}.", "This library belongs to this browser session.": "Esta biblioteca pertenece a esta sesión del navegador.", "Sign in to keep more across devices": "Inicia sesión para guardar más entre dispositivos", "Account usage": "Uso de la cuenta", "These limits follow your signed-in ChatGPT identity across devices.": "Estos límites siguen tu identidad de ChatGPT en todos tus dispositivos.",
 });
+
+for (const locale of Object.keys(journeyTreeMessages) as Array<Exclude<SupportedLocale, "en">>) {
+  Object.assign(translations[locale], journeyTreeMessages[locale]);
+}
+
+export const interfaceMessageKeys = Object.freeze(Object.keys(translations.es));
 
 function format(template: string, values: Values = {}) {
   return template.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? `{${name}}`));

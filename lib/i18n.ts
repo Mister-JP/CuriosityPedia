@@ -6,6 +6,15 @@ export const DEFAULT_LOCALE: SupportedLocale = "en";
 export const SUPPORTED_LOCALES = [
   { id: "en", name: "English", direction: "ltr" },
   { id: "es", name: "Español", direction: "ltr" },
+  { id: "fr", name: "Français", direction: "ltr" },
+  { id: "de", name: "Deutsch", direction: "ltr" },
+  { id: "pt", name: "Português", direction: "ltr" },
+  { id: "hi", name: "हिन्दी", direction: "ltr" },
+  { id: "bn", name: "বাংলা", direction: "ltr" },
+  { id: "ar", name: "العربية", direction: "rtl" },
+  { id: "zh-CN", name: "简体中文", direction: "ltr" },
+  { id: "ja", name: "日本語", direction: "ltr" },
+  { id: "ko", name: "한국어", direction: "ltr" },
 ] as const satisfies ReadonlyArray<{
   id: SupportedLocale;
   name: string;
@@ -36,4 +45,8 @@ export function localeName(locale: SupportedLocale): string {
 
 export function localeDirection(locale: SupportedLocale): "ltr" | "rtl" {
   return SUPPORTED_LOCALES.find(({ id }) => id === locale)?.direction ?? "ltr";
+}
+
+export function usesCompactWordSegmentation(locale: SupportedLocale): boolean {
+  return locale === "zh-CN" || locale === "ja" || locale === "ko";
 }

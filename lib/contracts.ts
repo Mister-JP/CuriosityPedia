@@ -11,7 +11,7 @@ export type ResearchPreset = "spark" | "standard" | "deep";
 export type AnswerDensity = "brief" | "balanced" | "rich";
 export type TextSize = "s" | "m" | "l" | "xl";
 export type ImagePreference = "avoid" | "when-useful" | "prefer";
-export type SupportedLocale = "en" | "es";
+export type SupportedLocale = "en" | "es" | "fr" | "de" | "pt" | "hi" | "bn" | "ar" | "zh-CN" | "ja" | "ko";
 
 export type UserPreferences = {
   interfaceLocale: SupportedLocale;
@@ -95,6 +95,30 @@ export type Viewer = {
   journeyLimit: number;
   guestExpiresAt?: number;
   hasGuestUpgrade?: boolean;
+};
+
+export type UsageSummary = {
+  asOf: number;
+  windowHours: 24;
+  liveResearch: {
+    used: number;
+    limit: number;
+    remaining: number;
+    nextSlotAt: number | null;
+    releasesAt: number[];
+  };
+  spend: {
+    usedUsd: number;
+    limitUsd: number;
+    remainingUsd: number;
+    nextReleaseAt: number | null;
+  };
+  library: {
+    used: number;
+    limit: number;
+    remaining: number;
+  };
+  guestSessionExpiresAt: number | null;
 };
 
 export type Source = {

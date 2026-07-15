@@ -16,6 +16,10 @@ type IdentityRow = {
   id: string;
 };
 
+type GuestIdentityRow = IdentityRow & {
+  expires_at: number | null;
+};
+
 export async function resolveViewer(): Promise<ViewerContext> {
   const db = getD1();
   const requestHeaders = await headers();
@@ -92,10 +96,10 @@ export async function resolveViewer(): Promise<ViewerContext> {
     const subject = await digest(`guest:${rawGuestToken}`);
     const identity = await db
       .prepare(
-        "SELECT id FROM identities WHERE provider = 'guest' AND provider_subject = ? LIMIT 1",
+        "SELECT id, expires_at FROM identities WHERE provider = 'guest' AND provider_subject = ? LIMIT 1",
       )
       .bind(subject)
-      .first<IdentityRow>();
+      .first<GuestIdentityRow>();
     if (identity) {
       await db
         .prepare("UPDATE identities SET last_seen_at = ? WHERE id = ?")
@@ -106,7 +110,7 @@ export async function resolveViewer(): Promise<ViewerContext> {
         mode: "guest",
         displayName: "Guest explorer",
         journeyLimit: 5,
-        guestExpiresAt: now + GUEST_MAX_AGE_SECONDS * 1000,
+        guestExpiresAt: identity.expires_at ?? now + GUEST_MAX_AGE_SECONDS * 1000,
       };
     }
   }

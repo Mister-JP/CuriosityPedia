@@ -17,7 +17,7 @@ This repository is the public implementation for the 2026 OpenAI Build Week hack
 - Provider failure or disconnect commits no partial turn; the fixture mode is an explicit user choice, never a silent fallback.
 - Daily project and per-identity cost ceilings stop new live work before a provider call.
 - Guest-to-account transfer is a deliberate, idempotent action rather than a side effect of sign-in.
-- A saved experience-language preference localizes the interface and future generated turns; research may still use the strongest sources in any language. English and Spanish are the initially reviewed locales.
+- A saved experience-language preference localizes the interface and future generated turns; research may still use the strongest sources in any language. The reviewed locales are English, Spanish, French, German, Portuguese, Hindi, Bengali, Arabic, Simplified Chinese, Japanese, and Korean.
 
 ## Stack
 
