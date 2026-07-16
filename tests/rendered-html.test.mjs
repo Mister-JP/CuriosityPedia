@@ -43,6 +43,29 @@ test("server-renders the honest WonderDrive V3 product shell", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project/i);
 });
 
+test("server-renders stable deep-link entry points", async () => {
+  const app = await worker();
+  for (const path of [
+    "/library",
+    "/bookmarks",
+    "/usage",
+    "/settings",
+    "/journeys/journey-1",
+    "/journeys/journey-1/turns/turn-1",
+    "/journeys/journey-1/map?turn=turn-1",
+  ]) {
+    const response = await app.fetch(
+      new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
+      env,
+      context,
+    );
+    assert.equal(response.status, 200, path);
+    const html = await response.text();
+    assert.match(html, /WonderDrive/i, path);
+    assert.match(html, /Opening your WonderDrive library/i, path);
+  }
+});
+
 test("exposes an explicit V3 health contract", async () => {
   const app = await worker();
   const response = await app.fetch(

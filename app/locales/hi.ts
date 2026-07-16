@@ -64,8 +64,6 @@ const messages: Record<string, string> = {
   "Choosing a path here creates a visible branch; your existing turns stay in the map.": "यहाँ एक पथ चुनने से एक दृश्य शाखा बनती है; आपके मौजूदा टर्न मानचित्र में रहते हैं।",
   "performed from live web research": "लाइव वेब शोध से किया गया",
   "COMPOSED": "रचित",
-  "Stop reading": "पढ़ना बंद करें",
-  "Read aloud": "ज़ोर से पढ़ें",
   "Save and export options": "सहेजने और निर्यात करने के विकल्प",
   "Save snapshot": "स्नैपशॉट सहेजें",
   "Export JSON": "JSON निर्यात करें",
@@ -75,6 +73,11 @@ const messages: Record<string, string> = {
   "Evidence & research details": "प्रमाण और शोध विवरण",
   "Deeper dive": "गहराई से जानें",
   "Let {performer} choose": "{performer} को चुनने दें",
+  "Other ways to continue": "आगे बढ़ने के दूसरे तरीके",
+  "Pick a path for me": "मेरे लिए एक रास्ता चुनें",
+  "WonderDrive chooses one": "WonderDrive एक चुनता है",
+  "Try two different questions": "दो अलग सवाल आज़माएँ",
+  "Change both choices": "दोनों विकल्प बदलें",
   "Replacement question direction": "वैकल्पिक प्रश्न दिशा",
   "Practical": "व्यावहारिक",
   "Surprising": "आश्चर्यजनक",
@@ -313,4 +316,3 @@ const messages: Record<string, string> = {
 };
 
 export default messages;
-

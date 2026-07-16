@@ -64,8 +64,6 @@ const messages: Record<string, string> = {
   "Choosing a path here creates a visible branch; your existing turns stay in the map.": "在此处选择路径会创建一个可见的分支；您现有的轮次仍保留在地图中。",
   "performed from live web research": "基于实时网页研究呈现",
   "COMPOSED": "已构建",
-  "Stop reading": "停止阅读",
-  "Read aloud": "朗读",
   "Save and export options": "保存与导出选项",
   "Save snapshot": "保存快照",
   "Export JSON": "导出 JSON",
@@ -75,6 +73,11 @@ const messages: Record<string, string> = {
   "Evidence & research details": "证据与研究详情",
   "Deeper dive": "深入探索",
   "Let {performer} choose": "让 {performer} 来选择",
+  "Other ways to continue": "其他继续方式",
+  "Pick a path for me": "帮我选一条路",
+  "WonderDrive chooses one": "由 WonderDrive 选择",
+  "Try two different questions": "换两个不同的问题",
+  "Change both choices": "更换两个选项",
   "Replacement question direction": "替换问题的方向",
   "Practical": "实用",
   "Surprising": "令人惊喜",
@@ -313,4 +316,3 @@ const messages: Record<string, string> = {
 };
 
 export default messages;
-

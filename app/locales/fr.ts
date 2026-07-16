@@ -64,8 +64,6 @@ const messages: Record<string, string> = {
   "Choosing a path here creates a visible branch; your existing turns stay in the map.": "Choisir un chemin crée une branche visible ; vos étapes existantes restent dans la carte.",
   "performed from live web research": "effectué via recherche web en direct",
   "COMPOSED": "CONPOSÉ",
-  "Stop reading": "Arrêter la lecture",
-  "Read aloud": "Lire à haute voix",
   "Save and export options": "Options d'enregistrement et d'exportation",
   "Save snapshot": "Enregistrer un instantané",
   "Export JSON": "Exporter JSON",
@@ -75,6 +73,11 @@ const messages: Record<string, string> = {
   "Evidence & research details": "Preuves et détails de la recherche",
   "Deeper dive": "Approfondissement",
   "Let {performer} choose": "Laissez {performer} choisir",
+  "Other ways to continue": "Autres façons de continuer",
+  "Pick a path for me": "Choisir un chemin pour moi",
+  "WonderDrive chooses one": "WonderDrive en choisit un",
+  "Try two different questions": "Essayer deux autres questions",
+  "Change both choices": "Changer les deux choix",
   "Replacement question direction": "Direction de la question de remplacement",
   "Practical": "Pratique",
   "Surprising": "Surprenant",
@@ -313,4 +316,3 @@ const messages: Record<string, string> = {
 };
 
 export default messages;
-

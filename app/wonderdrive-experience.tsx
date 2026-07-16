@@ -11,17 +11,22 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowsClockwise,
+  BookmarkSimple,
   CaretDown,
   CaretRight,
   CornersOut,
   Crosshair,
   ListBullets,
   MagnifyingGlass,
+  MagicWand,
   Minus,
   Path,
+  PencilSimple,
   Plus,
   TreeStructure,
   X,
@@ -30,14 +35,15 @@ import {
   BOOTSTRAP_CATALOG,
   DEFAULT_PREFERENCES,
   PERFORMERS,
+  PROMPT_VERSION,
+  REAL_WORLD_DISCOVERY_STARTERS,
   STARTERS,
 } from "../lib/catalog";
+import { CURIOSITY_QUOTES } from "../lib/curiosity-quotes";
 import type {
   AdvanceJourneyRequest,
   AnswerDensity,
   BootstrapCatalog,
-  CompareResult,
-  DiagnosticsReport,
   ApiFailure,
   ImagePreference,
   JourneyDetail,
@@ -52,8 +58,17 @@ import type {
   UsageSummary,
   UserPreferences,
   Viewer,
+  LiveResearchRequest,
 } from "../lib/contracts";
 import { SUPPORTED_LOCALES, localeDirection } from "../lib/i18n";
+import {
+  collectCivitaiTags,
+  fetchCivitaiImages,
+  getGalleryConfig,
+  saveGalleryDevOverride,
+  type CivitaiGalleryConfig,
+  type CivitaiImage,
+} from "../lib/civitai-gallery";
 import {
   api,
   errorCodeFrom,
@@ -63,8 +78,15 @@ import {
   streamLiveResearch,
 } from "./client-api";
 import { I18nProvider, translate, useI18n } from "./i18n";
+import {
+  journeyMapPath,
+  journeyStagePath,
+  parseWonderDriveRoute,
+  staticRoutePath,
+  type WonderDriveRoute,
+} from "./routes";
 
-type View = "start" | "journey" | "map" | "library" | "compare" | "usage" | "settings";
+type View = "start" | "journey" | "map" | "library" | "bookmarks" | "usage" | "settings";
 
 type SessionPayload = {
   journeys: JourneySummary[];
@@ -80,18 +102,49 @@ type JourneyViewOptions = {
   turnId?: string;
   view?: View;
   syncLibrary?: boolean;
+  history?: "push" | "replace" | "none";
 };
 
 const navItems: Array<{ id: View; label: string }> = [
   { id: "start", label: "New drive" },
   { id: "library", label: "Library" },
-  { id: "compare", label: "Compare" },
+  { id: "bookmarks", label: "Bookmarks" },
   { id: "usage", label: "Usage" },
   { id: "settings", label: "Settings" },
 ];
 
+function viewFromRoute(route: WonderDriveRoute | null): View {
+  if (!route) return "start";
+  if (route.name === "journey") return route.surface === "map" ? "map" : "journey";
+  return route.name;
+}
+
+const LANDING_HEADLINES = [
+  "Ask a question. Open a world.",
+  "Follow your wonder.",
+  "Start curious. Go anywhere.",
+  "One question can lead anywhere.",
+  "Find out what happens next.",
+  "Turn ‘why?’ into ‘wow!’",
+  "Small question. Big adventure.",
+  "Wonder. Learn. Keep going.",
+  "See what your question can become.",
+  "Pick a question. Start exploring.",
+  "Discover something new today.",
+  "Every answer opens another door.",
+  "Go where your curiosity takes you.",
+  "Ask anything. See where it leads.",
+] as const;
+
 export function WonderDriveExperience() {
-  const [view, setView] = useState<View>("start");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const route = useMemo(
+    () => parseWonderDriveRoute(pathname, searchParams),
+    [pathname, searchParams],
+  );
+  const [view, setView] = useState<View>(() => viewFromRoute(route));
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [journeys, setJourneys] = useState<JourneySummary[]>([]);
   const [activeJourney, setActiveJourney] = useState<JourneyDetail | null>(null);
@@ -101,8 +154,7 @@ export function WonderDriveExperience() {
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ApiFailure["error"]["code"] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [compareIds, setCompareIds] = useState<string[]>([]);
-  const [comparison, setComparison] = useState<CompareResult | null>(null);
+  const [bookmarkedTurns, setBookmarkedTurns] = useState<Record<string, number>>({});
   const [liveResearch, setLiveResearch] = useState<LiveResearchState | null>(null);
   const [catalog, setCatalog] = useState<BootstrapCatalog>(BOOTSTRAP_CATALOG);
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
@@ -113,7 +165,23 @@ export function WonderDriveExperience() {
   const [personalizedStarters, setPersonalizedStarters] = useState<PersonalizedStarter[]>(
     BOOTSTRAP_CATALOG.discoveryStarters,
   );
+  const activeJourneyRef = useRef(activeJourney);
+  const viewerRef = useRef(viewer);
+  const liveResearchRef = useRef(liveResearch);
+  const liveResearchAbortRef = useRef<AbortController | null>(null);
+  const pendingResearchRef = useRef<LiveResearchRequest | null>(null);
+  activeJourneyRef.current = activeJourney;
+  viewerRef.current = viewer;
+  liveResearchRef.current = liveResearch;
+  const returnTo = encodeURIComponent(`${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`);
   const t = (key: string, values?: Record<string, string | number>) => translate(preferences.interfaceLocale, key, values);
+
+  useEffect(() => {
+    document.documentElement.dataset.textSize = preferences.textSize;
+    return () => {
+      delete document.documentElement.dataset.textSize;
+    };
+  }, [preferences.textSize]);
 
   const refreshSession = useCallback(async () => {
     setError(null);
@@ -163,6 +231,7 @@ export function WonderDriveExperience() {
     try {
       return await work();
     } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return undefined;
       const message = messageFrom(cause);
       setError(message);
       setErrorCode(errorCodeFrom(cause));
@@ -176,7 +245,12 @@ export function WonderDriveExperience() {
   const presentJourney = useCallback((
     detail: JourneyDetail,
     nextViewer: Viewer,
-    { turnId = detail.currentTurnId, view = "journey", syncLibrary = true }: JourneyViewOptions = {},
+    {
+      turnId = detail.currentTurnId,
+      view = "journey",
+      syncLibrary = true,
+      history = "push",
+    }: JourneyViewOptions = {},
   ) => {
     setViewer(nextViewer);
     setActiveJourney(detail);
@@ -184,7 +258,13 @@ export function WonderDriveExperience() {
     setActiveTurnId(turnId);
     setView(view);
     if (syncLibrary) setJourneys((current) => upsertSummary(current, detail));
-  }, []);
+    if (history !== "none") {
+      const href = view === "map"
+        ? journeyMapPath(detail.id, turnId)
+        : journeyStagePath(detail.id, turnId);
+      router[history](href);
+    }
+  }, [router]);
 
   useEffect(() => {
     // The first client effect hydrates the durable server session; updates happen after fetch resolves.
@@ -193,18 +273,75 @@ export function WonderDriveExperience() {
   }, [refreshSession]);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("wonderdrive:bookmarked-turns");
+      // Bookmarks are device-local external state and hydrate after the server render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setBookmarkedTurns(JSON.parse(saved) as Record<string, number>);
+    } catch {
+      // A private browsing policy may block local storage; the current session still works.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!route) return;
+    if (liveResearchRef.current?.status === "running") {
+      liveResearchAbortRef.current?.abort();
+      liveResearchAbortRef.current = null;
+      setLiveResearch(null);
+    }
+    if (route.name !== "journey") {
+      // URL changes, including browser Back/Forward, own durable navigation state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setView(viewFromRoute(route));
+      return;
+    }
+
+    let cancelled = false;
+    const surfaceView: View = route.surface === "map" ? "map" : "journey";
+    const showJourney = (detail: JourneyDetail, nextViewer: Viewer) => {
+      if (cancelled) return;
+      const requestedTurn = detail.turns.some((turn) => turn.id === route.turnId)
+        ? route.turnId
+        : detail.currentTurnId;
+      presentJourney(detail, nextViewer, {
+        turnId: requestedTurn,
+        view: surfaceView,
+        syncLibrary: false,
+        history: "none",
+      });
+      const canonical = route.surface === "map"
+        ? journeyMapPath(detail.id, requestedTurn)
+        : journeyStagePath(detail.id, requestedTurn);
+      const current = `${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`;
+      if (canonical !== current) router.replace(canonical);
+    };
+
+    const currentJourney = activeJourneyRef.current;
+    const currentViewer = viewerRef.current;
+    if (currentJourney?.id === route.journeyId && currentViewer) {
+      showJourney(currentJourney, currentViewer);
+      return () => { cancelled = true; };
+    }
+
+    void runMutation(`open-${route.journeyId}`, async () => {
+      const payload = await api<JourneyDetail>(`/api/journeys/${route.journeyId}`);
+      showJourney(payload.data, payload.viewer);
+    });
+    return () => { cancelled = true; };
+  }, [pathname, presentJourney, route, router, runMutation, searchParams]);
+
+  useEffect(() => {
     if (view !== "usage") return;
     // The route transition intentionally refreshes server-owned rolling counters.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshUsage();
   }, [refreshUsage, view]);
 
-  const openJourney = useCallback(async (journeyId: string, targetView: View = "journey") => {
-    await runMutation(`open-${journeyId}`, async () => {
-      const payload = await api<JourneyDetail>(`/api/journeys/${journeyId}`);
-      presentJourney(payload.data, payload.viewer, { view: targetView, syncLibrary: false });
-    });
-  }, [presentJourney, runMutation]);
+  const openJourney = useCallback((journeyId: string, targetView: View = "journey") => {
+    const href = targetView === "map" ? journeyMapPath(journeyId) : journeyStagePath(journeyId);
+    router.push(href);
+  }, [router]);
 
   async function create(config: {
     seed: string;
@@ -221,11 +358,13 @@ export function WonderDriveExperience() {
         count: journeys.length,
         limit: viewer.journeyLimit,
       }));
-      setView("library");
+      navigate("library");
       return;
     }
     await runMutation("create", async () => {
       setView("journey");
+      const abortController = new AbortController();
+      liveResearchAbortRef.current = abortController;
       setLiveResearch({
         question: config.seed,
         performerId: config.performerId,
@@ -239,10 +378,14 @@ export function WonderDriveExperience() {
         retryAttempt: 0,
         maxRetries: 0,
       });
+      const request: LiveResearchRequest = { kind: "create", ...config, idempotencyKey: crypto.randomUUID() };
+      pendingResearchRef.current = request;
       const complete = await streamLiveResearch(
-        { kind: "create", ...config, idempotencyKey: crypto.randomUUID() },
+        request,
         setLiveResearch,
+        abortController.signal,
       );
+      liveResearchAbortRef.current = null;
       presentJourney(complete.data, complete.viewer);
       setLiveResearch((current) =>
         current
@@ -271,6 +414,8 @@ export function WonderDriveExperience() {
             : fromTurn?.options.find((option) => option.id === input.optionId);
         if (!fromTurn || !selected) throw new Error(t("Choose one of the two current paths."));
         setView("journey");
+        const abortController = new AbortController();
+        liveResearchAbortRef.current = abortController;
         setLiveResearch({
           question: selected.question,
           performerId: activeJourney.performerId,
@@ -284,8 +429,7 @@ export function WonderDriveExperience() {
           retryAttempt: 0,
           maxRetries: 0,
         });
-        const complete = await streamLiveResearch(
-          {
+        const request: LiveResearchRequest = {
             kind: "advance",
             journeyId: activeJourney.id,
             fromTurnId: input.turnId,
@@ -294,9 +438,14 @@ export function WonderDriveExperience() {
             optionId: input.optionId,
             expectedVersion: activeJourney.version,
             idempotencyKey: crypto.randomUUID(),
-          },
+          };
+        pendingResearchRef.current = request;
+        const complete = await streamLiveResearch(
+          request,
           setLiveResearch,
+          abortController.signal,
         );
+        liveResearchAbortRef.current = null;
         presentJourney(complete.data, complete.viewer);
         setLiveResearch((current) =>
           current
@@ -332,15 +481,58 @@ export function WonderDriveExperience() {
     });
   }
 
+  async function takeOverResearch() {
+    const pending = pendingResearchRef.current;
+    if (!pending) return;
+    await runMutation("take-over-research", async () => {
+      setError(null);
+      setErrorCode(null);
+      const abortController = new AbortController();
+      liveResearchAbortRef.current = abortController;
+      const request: LiveResearchRequest = {
+        ...pending,
+        idempotencyKey: crypto.randomUUID(),
+        takeoverExisting: true,
+      };
+      pendingResearchRef.current = request;
+      setLiveResearch((current) => current && {
+        ...current,
+        message: t("Taking over research in this tab…"),
+        events: [],
+        status: "running",
+        result: null,
+        error: null,
+        errorCode: null,
+        diagnosticId: null,
+        retryAttempt: 0,
+        maxRetries: 0,
+      });
+      const complete = await streamLiveResearch(request, setLiveResearch, abortController.signal);
+      liveResearchAbortRef.current = null;
+      presentJourney(complete.data, complete.viewer);
+      setLiveResearch((current) => current
+        ? { ...current, status: "complete", result: complete.data, message: t("Research committed") }
+        : current);
+    }, (message) => {
+      setLiveResearch((current) => current
+        ? { ...current, status: "error", error: message, message: t("Research stopped") }
+        : null);
+    });
+  }
+
   async function removeJourney(journeyId: string) {
     await runMutation(`delete-${journeyId}`, async () => {
       await api<{ id: string }>(`/api/journeys/${journeyId}`, { method: "DELETE" });
       setJourneys((current) => current.filter((journey) => journey.id !== journeyId));
-      setCompareIds((current) => current.filter((id) => id !== journeyId));
+      setBookmarkedTurns((current) => {
+        const next = Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${journeyId}::`)));
+        persistTurnBookmarks(next);
+        return next;
+      });
       if (activeJourney?.id === journeyId) {
         setActiveJourney(null);
         setActiveTurnId(null);
-        setView("library");
+        navigate("library");
       }
     });
   }
@@ -367,33 +559,44 @@ export function WonderDriveExperience() {
     });
   }
 
-  async function compare() {
-    if (compareIds.length !== 2) return;
-    await runMutation("compare", async () => {
-      const params = new URLSearchParams({ left: compareIds[0], right: compareIds[1] });
-      const payload = await api<CompareResult>(`/api/compare?${params}`);
-      setComparison(payload.data);
-    });
-  }
-
   const activeTurn = useMemo(
     () => activeJourney?.turns.find((turn) => turn.id === activeTurnId) ?? null,
     [activeJourney, activeTurnId],
   );
 
+  function toggleTurnBookmark(journeyId: string, turnId: string) {
+    const key = `${journeyId}::${turnId}`;
+    setBookmarkedTurns((current) => {
+      const next = { ...current };
+      if (next[key]) delete next[key];
+      else next[key] = Date.now();
+      persistTurnBookmarks(next);
+      return next;
+    });
+  }
+
   function navigate(next: View) {
     if ((next === "journey" || next === "map") && !activeJourney) {
-      setView(journeys.length ? "library" : "start");
+      const fallback = journeys.length ? "library" : "start";
+      setView(fallback);
+      router.push(staticRoutePath(fallback));
       return;
     }
+    liveResearchAbortRef.current?.abort();
+    liveResearchAbortRef.current = null;
     setView(next);
     setLiveResearch(null);
-    if (next === "compare") setComparison(null);
+    const href = next === "journey"
+      ? journeyStagePath(activeJourney!.id, activeTurnId ?? activeJourney!.currentTurnId)
+      : next === "map"
+        ? journeyMapPath(activeJourney!.id, activeTurnId ?? activeJourney!.currentTurnId)
+        : staticRoutePath(next);
+    router.push(href);
   }
 
   return (
     <I18nProvider locale={preferences.interfaceLocale}>
-    <main className={`app-shell text-${preferences.textSize} ${preferences.reduceMotion ? "reduce-motion" : ""}`}>
+    <main className={`app-shell ${preferences.reduceMotion ? "reduce-motion" : ""} ${view === "journey" && activeJourney && activeTurn ? "journey-stage-active" : ""}`}>
       <header className="app-header">
         <button className="wordmark" type="button" onClick={() => navigate("start")}>
           <span className="wordmark-mark" aria-hidden="true">W</span>
@@ -425,9 +628,9 @@ export function WonderDriveExperience() {
             <span><strong>{viewer?.displayName ?? t("Opening library…")}</strong><small>{viewer ? t("{count}/{limit} saved", { count: journeys.length, limit: viewer.journeyLimit }) : t("durable session")}</small></span>
           )}
           {viewer?.mode === "guest" ? (
-            <a className="identity-action" href="/signin-with-chatgpt?return_to=%2F">{t("Sign in")}</a>
+            <a className="identity-action" href={`/signin-with-chatgpt?return_to=${returnTo}`}>{t("Sign in")}</a>
           ) : viewer?.mode === "chatgpt" ? (
-            <a className="identity-action" href="/signout-with-chatgpt?return_to=%2F">{t("Sign out")}</a>
+            <a className="identity-action" href={`/signout-with-chatgpt?return_to=${returnTo}`}>{t("Sign out")}</a>
           ) : null}
         </div>
       </header>
@@ -453,9 +656,11 @@ export function WonderDriveExperience() {
           <span>{error}</span>
           <div className="error-banner-actions">
             {errorCode === "JOURNEY_LIMIT" ? (
-              <button type="button" onClick={() => { setError(null); setView("library"); }}>{t("Manage saved journeys")}</button>
+              <button type="button" onClick={() => { setError(null); navigate("library"); }}>{t("Manage saved journeys")}</button>
             ) : errorCode === "LIVE_RESEARCH_LIMIT" || errorCode === "BUDGET_EXCEEDED" ? (
-              <button type="button" onClick={() => { setError(null); setView("usage"); }}>{t("View usage")}</button>
+              <button type="button" onClick={() => { setError(null); navigate("usage"); }}>{t("View usage")}</button>
+            ) : errorCode === "ALREADY_IN_PROGRESS" ? (
+              <button type="button" onClick={() => void takeOverResearch()}>{t("Use this tab")}</button>
             ) : (
               <button type="button" onClick={() => { setError(null); void refreshSession(); }}>{t("Reconnect")}</button>
             )}
@@ -485,10 +690,11 @@ export function WonderDriveExperience() {
           }}
           onBack={() => {
             setLiveResearch(null);
-            if ((liveResearch.errorCode ?? errorCode) === "JOURNEY_LIMIT") setView("library");
-            else if (["LIVE_RESEARCH_LIMIT", "BUDGET_EXCEEDED"].includes(liveResearch.errorCode ?? errorCode ?? "")) setView("usage");
-            else setView(activeJourney ? "journey" : "start");
+            if ((liveResearch.errorCode ?? errorCode) === "JOURNEY_LIMIT") navigate("library");
+            else if (["LIVE_RESEARCH_LIMIT", "BUDGET_EXCEEDED"].includes(liveResearch.errorCode ?? errorCode ?? "")) navigate("usage");
+            else navigate(activeJourney ? "journey" : "start");
           }}
+          onTakeOver={errorCode === "ALREADY_IN_PROGRESS" ? () => void takeOverResearch() : undefined}
         />
       ) : view === "start" ? (
         <StartStage
@@ -508,24 +714,16 @@ export function WonderDriveExperience() {
           onDelete={(id) => void removeJourney(id)}
           onManage={(id, changes) => void manageJourney(id, changes)}
           onSnapshot={(id) => void snapshotJourney(id)}
-          onNew={() => setView("start")}
+          onNew={() => navigate("start")}
         />
-      ) : view === "compare" ? (
-        <CompareView
+      ) : view === "bookmarks" ? (
+        <BookmarksView
           journeys={journeys}
-          selected={compareIds}
-          comparison={comparison}
-          busy={mutation === "compare"}
-          onToggle={(id) => {
-            setComparison(null);
-            setCompareIds((current) =>
-              current.includes(id)
-                ? current.filter((value) => value !== id)
-                : [...current.slice(-1), id],
-            );
-          }}
-          onCompare={() => void compare()}
-          onNew={() => setView("start")}
+          bookmarks={bookmarkedTurns}
+          onOpen={(journeyId, turnId) => router.push(journeyStagePath(journeyId, turnId))}
+          onToggle={toggleTurnBookmark}
+          onPin={(journeyId, pinned) => void manageJourney(journeyId, { pinned })}
+          onNew={() => navigate("start")}
         />
       ) : view === "usage" ? (
         <UsageView
@@ -534,13 +732,16 @@ export function WonderDriveExperience() {
           loading={usageLoading}
           error={usageError}
           onRefresh={() => void refreshUsage()}
-          onOpenLibrary={() => setView("library")}
+          onOpenLibrary={() => navigate("library")}
         />
       ) : view === "settings" ? (
         <SettingsView
           viewer={viewer}
+          savedJourneyCount={journeys.length}
           preferences={preferences}
+          catalog={catalog}
           busy={mutation === "preferences"}
+          onPreviewTextSize={(textSize) => setPreferences((current) => ({ ...current, textSize }))}
           onSave={async (next) => {
             await runMutation("preferences", async () => {
               const payload = await api<UserPreferences>("/api/preferences", {
@@ -574,8 +775,8 @@ export function WonderDriveExperience() {
               </select>
             </label>
             <div>
-              <button type="button" className={view === "journey" ? "active" : ""} aria-current={view === "journey" ? "page" : undefined} onClick={() => setView("journey")}>{t("Stage")}</button>
-              <button type="button" className={view === "map" ? "active" : ""} aria-current={view === "map" ? "page" : undefined} onClick={() => setView("map")}>{t("Journey map")}</button>
+              <button type="button" className={view === "journey" ? "active" : ""} aria-current={view === "journey" ? "page" : undefined} onClick={() => navigate("journey")}>{t("Stage")}</button>
+              <button type="button" className={view === "map" ? "active" : ""} aria-current={view === "map" ? "page" : undefined} onClick={() => navigate("map")}>{t("Journey map")}</button>
             </div>
           </nav>
           {view === "map" ? (
@@ -584,10 +785,12 @@ export function WonderDriveExperience() {
               activeTurnId={activeTurn.id}
               onSelect={(turnId) => {
                 setActiveTurnId(turnId);
+                router.replace(journeyMapPath(activeJourney.id, turnId), { scroll: false });
               }}
               onContinue={(turnId) => {
                 setActiveTurnId(turnId);
                 setView("journey");
+                router.push(journeyStagePath(activeJourney.id, turnId));
               }}
               onChoose={(turnId, optionId) => void advance("choose", { turnId, optionId })}
             />
@@ -599,13 +802,14 @@ export function WonderDriveExperience() {
               onChoose={(optionId) => void advance("choose", { turnId: activeTurn.id, optionId })}
               onReject={(adventure, reason) => void advance("reject", { turnId: activeTurn.id, adventure, reason })}
               onDelegate={() => void advance("delegate", { turnId: activeTurn.id })}
-              speechRate={preferences.speechRate}
               onSnapshot={() => void snapshotJourney(activeJourney.id)}
+              bookmarked={Boolean(bookmarkedTurns[`${activeJourney.id}::${activeTurn.id}`])}
+              onBookmark={() => toggleTurnBookmark(activeJourney.id, activeTurn.id)}
             />
           )}
         </div>
       ) : (
-        <EmptyStage onOpenLibrary={() => setView("library")} />
+        <EmptyStage onOpenLibrary={() => navigate("library")} />
       )}
 
       {view !== "start" && (
@@ -645,10 +849,10 @@ function StartStage({
   preferences: UserPreferences;
   starters: PersonalizedStarter[];
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [seed, setSeed] = useState("");
   const [performerId, setPerformerId] = useState<PerformerId>("sage");
-  const [modelId, setModelId] = useState<ModelId>("gpt-5.6-luna");
+  const [modelId] = useState<ModelId>(preferences.defaultModelId);
   const performerIdRef = useRef<PerformerId>("sage");
   const starterCache = useRef(new Map<PerformerId, PersonalizedStarter[]>([["sage", starters]]));
   const [visibleStarters, setVisibleStarters] = useState<PersonalizedStarter[]>(
@@ -675,6 +879,10 @@ function StartStage({
   const exactMatch = normalizedSeed
     ? visibleStarters.find((starter) => starter.question.toLowerCase() === normalizedSeed)
     : undefined;
+  const landingHeadline = useLandingHeadline(
+    locale === "en" ? LANDING_HEADLINES : [t("Explore a question")],
+    preferences.reduceMotion,
+  );
 
   useEffect(() => {
     starterCache.current.set("sage", starters);
@@ -695,7 +903,10 @@ function StartStage({
       return;
     }
 
-    setVisibleStarters(recommendationsForPerformer(nextId, starters));
+    setVisibleStarters(recommendationsForPerformer(
+      nextId,
+      nextId === "atlas" ? REAL_WORLD_DISCOVERY_STARTERS.map((item) => ({ ...item })) : starters,
+    ));
     setStartersLoading(true);
     try {
       const payload = await api<StarterPayload>(starterRecommendationsUrl(nextId));
@@ -750,110 +961,133 @@ function StartStage({
   return (
     <section className="start-stage-simple" aria-labelledby="start-title">
       <form className="start-console-simple" onSubmit={submit}>
-        <div className="recommendation-heading">
-          <div>
-            <strong>{visibleStarters.length} {t("rabbit holes")}</strong>
-            <span>{startersLoading ? t("Scanning what’s unfolding now…") : t("Current signals + {performer} + {context}", { performer: performer.name, context: t(journeyCount ? "your history" : "wild-card domains") })}</span>
+        <div className="landing-search-pane">
+          <div className="recommendation-heading">
+            <div>
+              <strong>{visibleStarters.length} {t("rabbit holes")}</strong>
+              <span>{startersLoading ? t("Scanning what’s unfolding now…") : t("Current signals + {performer} + {context}", { performer: performer.name, context: t(journeyCount ? "your history" : "wild-card domains") })}</span>
+            </div>
+            <button type="button" className="refresh-starters" disabled={startersLoading} onClick={() => void refreshStarterQuestions()}>
+              <span aria-hidden="true">↻</span>{t(startersLoading ? "Hunting…" : "Find new questions")}
+            </button>
           </div>
-          <button type="button" className="refresh-starters" disabled={startersLoading} onClick={() => void refreshStarterQuestions()}>
-            <span aria-hidden="true">↻</span>{t(startersLoading ? "Hunting…" : "Find new questions")}
-          </button>
-        </div>
-        <div className="starter-marquee starter-marquee-simple" aria-label={t("Questions suggested for {performer}", { performer: performer.name })}>
-          <div className="starter-marquee-window">
-            <div className="starter-marquee-track">
-              {[0, 1].map((copy) => (
-                <div className="starter-marquee-set" key={copy} aria-hidden={copy === 1}>
-                  {visibleStarters.map((starter, index) => (
-                    <button
-                      type="button"
-                      key={`${copy}-${starter.question}-${index}`}
-                      onClick={() => setSeed(starter.question)}
-                      tabIndex={copy === 1 ? -1 : undefined}
-                    >
-                      <span>{starter.topic}</span>
-                      {starter.question}
-                    </button>
-                  ))}
-                </div>
-              ))}
+          <div className="starter-marquee starter-marquee-simple" aria-label={t("Questions suggested for {performer}", { performer: performer.name })}>
+            <div className="starter-marquee-window">
+              <div className="starter-marquee-track">
+                {[0, 1].map((copy) => (
+                  <div className="starter-marquee-set" key={copy} aria-hidden={copy === 1}>
+                    {visibleStarters.map((starter, index) => (
+                      <button
+                        type="button"
+                        key={`${copy}-${starter.question}-${index}`}
+                        onClick={() => setSeed(starter.question)}
+                        tabIndex={copy === 1 ? -1 : undefined}
+                      >
+                        <span>{starter.topic}</span>
+                        {starter.question}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+          <div className="landing-main-stack">
+          <div className="landing-compose-main">
+            <h1 id="start-title" key={landingHeadline}>{landingHeadline}</h1>
+            <div className="question-field-shell">
+              <label className="question-input question-input-simple">
+                <span className="sr-only">{t("Starting question")}</span>
+                <textarea
+                  value={seed}
+                  onChange={(event) => setSeed(event.target.value)}
+                  onKeyDown={completeQuestion}
+                  minLength={3}
+                  maxLength={280}
+                  rows={2}
+                  required
+                  aria-controls="question-autocomplete"
+                  placeholder={preferences.reduceMotion ? placeholderQuestions[0] ?? t("Ask anything…") : animatedPlaceholder}
+                />
+                <small>{seed.length}/280</small>
+                <button className="question-submit" type="submit" disabled={creating || seed.trim().length < 3}>
+                  <span>{t(creating ? "Researching…" : "Begin wonder")}</span>
+                  <i aria-hidden="true">→</i>
+                </button>
+              </label>
+              <div className="question-autocomplete" id="question-autocomplete" aria-live="polite">
+                {autocompleteMatch ? (
+                  <button type="button" onClick={() => setSeed(autocompleteMatch.question)}>
+                    <span>{t("Tab to complete")}</span>{autocompleteMatch.question}
+                  </button>
+                ) : exactMatch ? (
+                  <span><strong>{t("Recommended match")}</strong>{exactMatch.topic}</span>
+                ) : (
+                  <span className="question-autocomplete-idle">{t("Start typing for recommendation matches")}</span>
+                )}
+              </div>
+            </div>
 
-        <h1 id="start-title">{t("What are you curious about?")}</h1>
-        <div className="question-field-shell">
-          <label className="question-input question-input-simple">
-            <span className="sr-only">{t("Starting question")}</span>
-            <textarea
-              value={seed}
-              onChange={(event) => setSeed(event.target.value)}
-              onKeyDown={completeQuestion}
-              minLength={3}
-              maxLength={280}
-              rows={2}
-              required
-              aria-controls="question-autocomplete"
-              placeholder={preferences.reduceMotion ? placeholderQuestions[0] ?? t("Ask anything…") : animatedPlaceholder}
-            />
-            <small>{seed.length}/280</small>
-          </label>
-          <div className="question-autocomplete" id="question-autocomplete" aria-live="polite">
-            {autocompleteMatch ? (
-              <button type="button" onClick={() => setSeed(autocompleteMatch.question)}>
-                <span>{t("Tab to complete")}</span>{autocompleteMatch.question}
-              </button>
-            ) : exactMatch ? (
-              <span><strong>{t("Recommended match")}</strong>{exactMatch.topic}</span>
-            ) : (
-              <span className="question-autocomplete-idle">{t("Start typing for recommendation matches")}</span>
-            )}
+            <div className="start-selectors">
+              <label>
+                <span>{t("Performer")}</span>
+                <span className="start-select-wrap">
+                  <span className="performer-mark" aria-hidden="true">{performer.mark}</span>
+                  <select value={performerId} onChange={(event) => void choosePerformer(event.target.value as PerformerId)}>
+                    {catalog.performers.map((item) => (
+                      <option value={item.id} key={item.id}>{item.name} — {t(item.role)}</option>
+                    ))}
+                  </select>
+                </span>
+              </label>
+            </div>
+
+            <div className={`performer-layer ${performer.accent}`}>
+              <span>{t("{performer} will carry this question", { performer: performer.name })}</span>
+              <p>{t(performer.cue)}</p>
+              <small>{performer.voiceTraits.map((trait) => t(trait)).join(" · ")}</small>
+            </div>
+
+            <p className="honesty-note">
+              <span aria-hidden="true">◉</span>
+              {t(model.disclosure)} Change the default model in Settings.
+            </p>
+          </div>
+            <CuriosityStickerWall />
           </div>
         </div>
-
-        <div className="start-selectors">
-          <label>
-            <span>{t("Performer")}</span>
-            <span className="start-select-wrap">
-              <span className="performer-mark" aria-hidden="true">{performer.mark}</span>
-              <select value={performerId} onChange={(event) => void choosePerformer(event.target.value as PerformerId)}>
-                {catalog.performers.map((item) => (
-                  <option value={item.id} key={item.id}>{item.name} — {t(item.role)}</option>
-                ))}
-              </select>
-            </span>
-          </label>
-          <label>
-            <span>{t("Model")}</span>
-            <span className="start-select-wrap model-select-wrap">
-              <select value={modelId} onChange={(event) => setModelId(event.target.value as ModelId)}>
-                {catalog.models.map((item) => (
-                  <option value={item.id} key={item.id}>
-                    {item.name} — {item.speedBand} · ${item.inputUsdPerMillion}/$${item.outputUsdPerMillion}
-                  </option>
-                ))}
-              </select>
-            </span>
-          </label>
-        </div>
-
-        <div className={`performer-layer ${performer.accent}`}>
-          <span>{t("{performer} will carry this question", { performer: performer.name })}</span>
-          <p>{t(performer.cue)}</p>
-          <small>{performer.voiceTraits.map((trait) => t(trait)).join(" · ")}</small>
-        </div>
-
-        <button className="launch-button launch-button-simple" type="submit" disabled={creating || seed.trim().length < 3}>
-          <span>{t(creating ? "Researching in the foreground…" : "Begin the wonder")}</span>
-          <i aria-hidden="true">→</i>
-        </button>
-        <p className="honesty-note">
-          <span aria-hidden="true">◉</span>
-          {t(model.disclosure)} {t("Input/output prices shown per 1M tokens; search is metered separately.")}
-        </p>
+        <CivitaiArtWindow reduceMotion={preferences.reduceMotion} />
       </form>
     </section>
   );
+}
+
+function useLandingHeadline(headlines: readonly string[], reduceMotion: boolean) {
+  const [headlineIndex, setHeadlineIndex] = useState(0);
+
+  useEffect(() => {
+    if (headlines.length < 2) return;
+
+    const randomIndex = () => Math.floor(Math.random() * headlines.length);
+    // Randomize after hydration so server and client markup stay identical.
+    const randomizeTimeout = window.setTimeout(() => setHeadlineIndex(randomIndex()), 0);
+
+    if (reduceMotion) return () => window.clearTimeout(randomizeTimeout);
+
+    const interval = window.setInterval(() => {
+      setHeadlineIndex((current) => {
+        const offset = 1 + Math.floor(Math.random() * (headlines.length - 1));
+        return (current + offset) % headlines.length;
+      });
+    }, 7000);
+
+    return () => {
+      window.clearTimeout(randomizeTimeout);
+      window.clearInterval(interval);
+    };
+  }, [headlines, reduceMotion]);
+
+  return headlines[headlineIndex] ?? headlines[0] ?? "Explore a question";
 }
 
 function recommendationsForPerformer(
@@ -914,11 +1148,13 @@ function JourneyBufferingStage({
   errorCode,
   onComplete,
   onBack,
+  onTakeOver,
 }: {
   state: LiveResearchState;
   errorCode: ApiFailure["error"]["code"] | null;
   onComplete: () => void;
   onBack: () => void;
+  onTakeOver?: () => void;
 }) {
   const { t } = useI18n();
   useEffect(() => {
@@ -961,7 +1197,10 @@ function JourneyBufferingStage({
               <p>{state.error}</p>
               {state.diagnosticId && <code>Diagnostic {formatDiagnosticId(state.diagnosticId)}</code>}
             </div>
-            <button type="button" onClick={onBack}>{capacityError ? t("Manage saved journeys") : usageError ? t("View usage") : t("Return safely")} →</button>
+            <div className="buffering-error-actions">
+              {onTakeOver && <button type="button" onClick={onTakeOver}>{t("Use this tab")} →</button>}
+              <button type="button" className={onTakeOver ? "secondary" : undefined} onClick={onBack}>{capacityError ? t("Manage saved journeys") : usageError ? t("View usage") : t("Return safely")} →</button>
+            </div>
           </div>
         ) : (
           <>
@@ -997,8 +1236,9 @@ function PerformanceStage({
   onChoose,
   onReject,
   onDelegate,
-  speechRate,
   onSnapshot,
+  bookmarked,
+  onBookmark,
 }: {
   journey: JourneyDetail;
   turn: JourneyTurn;
@@ -1006,20 +1246,38 @@ function PerformanceStage({
   onChoose: (optionId: string) => void;
   onReject: (adventure: number, reason?: string) => void;
   onDelegate: () => void;
-  speechRate: number;
   onSnapshot: () => void;
+  bookmarked: boolean;
+  onBookmark: () => void;
 }) {
   const { t, locale } = useI18n();
   const [adventure, setAdventure] = useState(50);
   const [reason, setReason] = useState("");
-  const [speaking, setSpeaking] = useState(false);
   const [deepDiveOpen, setDeepDiveOpen] = useState(false);
   const [redrawOpen, setRedrawOpen] = useState(false);
+  const [redrawNoteOpen, setRedrawNoteOpen] = useState(false);
   const deepDiveTriggerRef = useRef<HTMLButtonElement>(null);
   const deepDiveCloseRef = useRef<HTMLButtonElement>(null);
   const performer = PERFORMERS.find((item) => item.id === journey.performerId)!;
   const historical = turn.id !== journey.currentTurnId;
   const actionable = turn.options.filter((option) => option.state === "proposed").length > 0;
+  const visibleAnswerBlockCount = performer.id === "atlas" || turn.metadata.answerDensity === "rich" ? 2 : 1;
+  const topicRepeatsQuestion = turn.topicLabel.localeCompare(
+    turn.question,
+    turn.metadata.outputLocale,
+    { sensitivity: "base", ignorePunctuation: true },
+  ) === 0;
+  const atlasRelevanceGuaranteed = performer.id === "atlas" && turn.metadata.promptVersion === PROMPT_VERSION;
+
+  function closeRedraw() {
+    setRedrawOpen(false);
+    setRedrawNoteOpen(false);
+  }
+
+  function submitRedraw() {
+    if (!actionable || busy !== null) return;
+    onReject(adventure, reason.trim() || undefined);
+  }
 
   useEffect(() => {
     if (!deepDiveOpen) return;
@@ -1056,26 +1314,6 @@ function PerformanceStage({
     });
   }
 
-  function toggleSpeech() {
-    if (!("speechSynthesis" in window)) return;
-    if (speaking) {
-      window.speechSynthesis.cancel();
-      setSpeaking(false);
-      return;
-    }
-    const utterance = new SpeechSynthesisUtterance(`${turn.question}. ${turn.answer}. ${turn.transition}`);
-    utterance.rate = speechRate;
-    utterance.lang = turn.metadata.outputLocale;
-    const voices = window.speechSynthesis.getVoices();
-    utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === turn.metadata.outputLocale.toLowerCase())
-      ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(turn.metadata.outputLocale.split("-")[0].toLowerCase()))
-      ?? null;
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
-    window.speechSynthesis.speak(utterance);
-    setSpeaking(true);
-  }
-
   return (
     <section className="performance-stage article-journey-stage" aria-labelledby="performance-title" lang={turn.metadata.outputLocale} dir={localeDirection(turn.metadata.outputLocale)}>
       <header className="performance-header article-journey-header">
@@ -1096,15 +1334,24 @@ function PerformanceStage({
         </div>
       )}
 
+      <div className={`journey-answer-layout ${turn.media.length ? "has-media" : "without-media"}`}>
+        <div className="journey-answer-reading-pane">
       <article className={`contained-answer-card ${turn.media.length ? "has-media" : "without-media"}`}>
         <div className="contained-answer-topline">
           <div className="answer-byline compact-byline">
             <span className={`performer-mark ${performer.accent}`}>{performer.mark}</span>
             <div><strong>{performer.name}</strong><small>{t("performed from live web research")}</small></div>
-            <span className="ready-stamp">{t("COMPOSED")}</span>
           </div>
           <div className="contained-answer-tools">
-            <button type="button" onClick={toggleSpeech}>{t(speaking ? "Stop reading" : "Read aloud")}</button>
+            <button
+              type="button"
+              className={`turn-bookmark-action ${bookmarked ? "saved" : ""}`}
+              aria-pressed={bookmarked}
+              onClick={onBookmark}
+            >
+              <BookmarkSimple weight={bookmarked ? "fill" : "regular"} aria-hidden="true" />
+              {bookmarked ? "Saved" : "Save question"}
+            </button>
             <details className="answer-overflow">
               <summary aria-label={t("Save and export options")}>•••</summary>
               <div>
@@ -1118,14 +1365,16 @@ function PerformanceStage({
         <div className="contained-answer-content">
           <div className="contained-answer-summary">
             <p className="card-kicker">{t("The answer")}</p>
-            <h2>{turn.topicLabel}</h2>
             <div className="contained-answer-prose">
-              {turn.answerBlocks.slice(0, 1).map((block, blockIndex) => (
-                <p key={`${turn.id}-answer-${blockIndex}`}>{block.text} {citations(block.sourceIds)}</p>
+              {turn.answerBlocks.slice(0, visibleAnswerBlockCount).map((block, blockIndex) => (
+                <div className="visible-answer-block" key={`${turn.id}-answer-${blockIndex}`}>
+                  {atlasRelevanceGuaranteed && blockIndex === 1 && <span className="real-world-relevance-label">{t("Real-world relevance")}</span>}
+                  <p>{block.text} {citations(block.sourceIds)}</p>
+                </div>
               ))}
             </div>
             <div className="answer-tags" aria-label={t("Answer characteristics")}>
-              <span>{turn.topicLabel}</span>
+              {!topicRepeatsQuestion && <span>{turn.topicLabel}</span>}
               <span>{t("{count} checked sources", { count: turn.sources.length })}</span>
               <span>{t("live research")}</span>
             </div>
@@ -1135,7 +1384,6 @@ function PerformanceStage({
             </button>
           </div>
 
-          <AnswerVisual media={turn.media} />
         </div>
       </article>
 
@@ -1157,22 +1405,71 @@ function PerformanceStage({
             </button>
           ))}
         </div>
-        <div className="journey-secondary-actions">
-          <button type="button" disabled={!actionable || busy !== null} onClick={onDelegate}>✦ {t("Let {performer} choose", { performer: performer.name.replace("The ", "") })}</button>
-          <button type="button" aria-expanded={redrawOpen} onClick={() => setRedrawOpen((open) => !open)}>{t("Neither question works")} {redrawOpen ? "⌃" : "⌄"}</button>
-        </div>
-        {redrawOpen && (
-          <div className="redraw-panel">
-            <div className="redraw-modes" aria-label={t("Replacement question direction")}>
-              <button type="button" className={adventure === 20 ? "active" : ""} onClick={() => setAdventure(20)}>{t("Practical")}</button>
-              <button type="button" className={adventure === 78 ? "active" : ""} onClick={() => setAdventure(78)}>{t("Surprising")}</button>
-              <button type="button" className={adventure === 50 ? "active" : ""} onClick={() => setAdventure(50)}>{t("Different direction")}</button>
-            </div>
-            <label className="redraw-note"><span>{t("Optional note")}</span><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={280} placeholder={t("What should change about the next two questions?")} /></label>
-            <button className="redraw-submit" type="button" disabled={!actionable || busy !== null} onClick={() => onReject(adventure, reason.trim() || undefined)}>{t(busy === "reject" ? "Replacing…" : "Generate two new questions")}</button>
+        <div className="journey-secondary-wrap">
+          <p>{t("Other ways to continue")}</p>
+          <div className="journey-secondary-actions" role="group" aria-label={t("Other ways to continue")}>
+            {!redrawOpen ? (
+              <>
+                <button type="button" disabled={!actionable || busy !== null} onClick={onDelegate}>
+                  <MagicWand aria-hidden="true" />
+                  <span><strong>{t("Pick a path for me")}</strong><small>{t("WonderDrive chooses one")}</small></span>
+                </button>
+                <button type="button" aria-expanded="false" aria-controls="redraw-inline-controls" onClick={() => setRedrawOpen(true)}>
+                  <ArrowsClockwise aria-hidden="true" />
+                  <span><strong>{t("Try two different questions")}</strong><small>{t("Change both choices")}</small></span>
+                  <CaretRight aria-hidden="true" />
+                </button>
+              </>
+            ) : (
+              <div className={`redraw-inline redraw-inline-wide ${redrawNoteOpen ? "note-open" : ""}`} id="redraw-inline-controls" aria-label={t("Replacement question direction")}>
+                {redrawNoteOpen ? (
+                  <>
+                    <PencilSimple className="redraw-inline-icon" aria-hidden="true" />
+                    <label className="redraw-inline-note">
+                      <span className="sr-only">{t("Optional note")}</span>
+                      <input
+                        autoFocus
+                        value={reason}
+                        onChange={(event) => setReason(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") submitRedraw();
+                          if (event.key === "Escape") setRedrawNoteOpen(false);
+                        }}
+                        maxLength={280}
+                        placeholder={t("What should change about the next two questions?")}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <ArrowsClockwise className="redraw-inline-icon" aria-hidden="true" />
+                    <div className="redraw-inline-modes" role="group" aria-label={t("Replacement question direction")}>
+                      <small>{t("Change both choices")}</small>
+                      <button type="button" className={adventure === 20 ? "active" : ""} aria-pressed={adventure === 20} onClick={() => setAdventure(20)}>{t("Practical")}</button>
+                      <button type="button" className={adventure === 78 ? "active" : ""} aria-pressed={adventure === 78} onClick={() => setAdventure(78)}>{t("Surprising")}</button>
+                      <button type="button" className={adventure === 50 ? "active" : ""} aria-pressed={adventure === 50} onClick={() => setAdventure(50)}>{t("Different direction")}</button>
+                    </div>
+                    <button className="redraw-inline-note-trigger" type="button" onClick={() => setRedrawNoteOpen(true)}>
+                      <PencilSimple aria-hidden="true" />
+                      <span>{t("Optional note")}</span>
+                    </button>
+                  </>
+                )}
+                <button className="redraw-inline-close" type="button" aria-label={t("Dismiss")} onClick={closeRedraw}><X aria-hidden="true" /></button>
+                <button className="redraw-inline-submit" type="button" aria-label={t(busy === "reject" ? "Replacing…" : "Generate two new questions")} disabled={!actionable || busy !== null} onClick={submitRedraw}><ArrowRight aria-hidden="true" /></button>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </section>
+        </div>
+
+        <aside className="journey-visual-column" aria-label={t("Visual evidence")}>
+          {turn.media.length
+            ? <AnswerVisual media={turn.media} />
+            : <MissingVisualEvidence topicLabel={turn.topicLabel} />}
+        </aside>
+      </div>
 
       {deepDiveOpen && (
         <div className="deep-dive-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeepDiveOpen(false); }}>
@@ -1208,6 +1505,25 @@ function PerformanceStage({
   );
 }
 
+function persistTurnBookmarks(bookmarks: Record<string, number>) {
+  try {
+    window.localStorage.setItem("wonderdrive:bookmarked-turns", JSON.stringify(bookmarks));
+  } catch {
+    // The in-memory state remains useful when storage is unavailable.
+  }
+}
+
+function MissingVisualEvidence({ topicLabel }: { topicLabel: string }) {
+  return (
+    <section className="missing-visual-evidence" role="status">
+      <span>Visual evidence required</span>
+      <div aria-hidden="true"><i /><i /><i /></div>
+      <h2>{topicLabel}</h2>
+      <p>This older saved turn has no sourced real-world image. New WonderDrive turns now retry research instead of completing without one.</p>
+    </section>
+  );
+}
+
 function AnswerVisual({
   media,
   compact = false,
@@ -1222,10 +1538,15 @@ function AnswerVisual({
   const visible = media
     .filter((item) => !failedUrls.includes(item.imageUrl))
     .slice(0, compact ? 4 : 8);
+
   if (!visible.length) return null;
   const activeIndex = Math.min(selectedIndex, visible.length - 1);
   const selected = visible[activeIndex];
-  const noticeItems = selected.whatToNotice?.length ? selected.whatToNotice : [selected.caption];
+  const visualCommentary = selected.commentary?.trim() || [
+    selected.whyIncluded,
+    ...(selected.whatToNotice ?? []),
+    selected.learning,
+  ].filter(Boolean).join(" ") || selected.caption;
   const roleLabel = (selected.role ?? "context").replace("-", " ");
 
   function selectImage(nextIndex: number) {
@@ -1253,6 +1574,17 @@ function AnswerVisual({
           <a href={selected.sourcePageUrl} target="_blank" rel="noreferrer" aria-label={`${selected.title ?? selected.caption}. ${t("Open")} ${t("Source")}.`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
+              className="answer-gallery-backdrop"
+              key={`${selected.imageUrl}-backdrop`}
+              src={selected.imageUrl}
+              alt=""
+              aria-hidden="true"
+              loading="eager"
+              referrerPolicy="no-referrer"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="answer-gallery-artwork"
               key={selected.imageUrl}
               src={selected.imageUrl}
               alt={selected.alt}
@@ -1273,7 +1605,9 @@ function AnswerVisual({
               <button type="button" onClick={() => selectImage(activeIndex - 1)} aria-label={t("Previous image")}>
                 <ArrowLeft aria-hidden="true" weight="bold" />
               </button>
-              <span aria-live="polite">{activeIndex + 1} / {visible.length}</span>
+              <div className="answer-gallery-playback">
+                <span aria-live="polite">{String(activeIndex + 1).padStart(2, "0")} / {String(visible.length).padStart(2, "0")}</span>
+              </div>
               <button type="button" onClick={() => selectImage(activeIndex + 1)} aria-label={t("Next image")}>
                 <ArrowRight aria-hidden="true" weight="bold" />
               </button>
@@ -1286,9 +1620,7 @@ function AnswerVisual({
       <aside className="answer-gallery-notes" aria-live="polite">
         <span className="answer-gallery-role">{roleLabel}</span>
         <h3>{selected.title ?? selected.caption}</h3>
-        <div><strong>{t("Why it is here")}</strong><p>{selected.whyIncluded ?? selected.caption}</p></div>
-        <div><strong>{t("What to notice")}</strong><ul>{noticeItems.map((item, index) => <li key={`${selected.imageUrl}-notice-${index}`}>{item}</li>)}</ul></div>
-        <div><strong>{t("What it helps explain")}</strong><p>{selected.learning ?? selected.caption}</p></div>
+        <p className="answer-gallery-commentary">{visualCommentary}</p>
       </aside>
 
       <div className="answer-gallery-strip" aria-label={t("Select an image")}>
@@ -2037,7 +2369,7 @@ function Library({
   return (
     <section className="library-view" aria-labelledby="library-title">
       <header className="view-heading">
-        <div><p className="eyebrow"><span /> {t("Saved journeys")}</p><h1 id="library-title">{t("Questions worth returning to.")}</h1></div>
+        <div><p className="eyebrow"><span /> {t("Saved journeys")}</p><h1 id="library-title">{t("Your saved questions")}</h1></div>
         <div><p>{t("{count} of {limit} journeys saved", { count: journeys.length, limit: viewer?.journeyLimit ?? "—" })}</p><button type="button" className="compact-action" onClick={onNew}>{t("New drive +")}</button></div>
       </header>
       <div className="library-filters" aria-label={t("Library filters")}>
@@ -2081,73 +2413,168 @@ function Library({
   );
 }
 
-function CompareView({
+type SavedItem = {
+  key: string;
+  kind: "journey" | "question";
+  journeyId: string;
+  turnId?: string;
+  title: string;
+  context: string;
+  time: number;
+  performerId: PerformerId;
+  pinned: boolean;
+  sourceCount: number;
+};
+
+function BookmarksView({
   journeys,
-  selected,
-  comparison,
-  busy,
+  bookmarks,
+  onOpen,
   onToggle,
-  onCompare,
+  onPin,
   onNew,
 }: {
   journeys: JourneySummary[];
-  selected: string[];
-  comparison: CompareResult | null;
-  busy: boolean;
-  onToggle: (id: string) => void;
-  onCompare: () => void;
+  bookmarks: Record<string, number>;
+  onOpen: (journeyId: string, turnId?: string) => void;
+  onToggle: (journeyId: string, turnId: string) => void;
+  onPin: (journeyId: string, pinned: boolean) => void;
   onNew: () => void;
 }) {
-  const { t } = useI18n();
+  const { locale } = useI18n();
+  const [details, setDetails] = useState<Record<string, JourneyDetail>>({});
+  const [query, setQuery] = useState("");
+  const [collection, setCollection] = useState<"all" | "questions" | "pinned">("all");
+  const [performer, setPerformer] = useState<PerformerId | "all">("all");
+  const [sort, setSort] = useState<"recent" | "oldest" | "title">("recent");
+
+  useEffect(() => {
+    let cancelled = false;
+    const needed = [...new Set(Object.keys(bookmarks).map((key) => key.split("::")[0]))]
+      .filter((id) => !details[id] && journeys.some((journey) => journey.id === id));
+    if (!needed.length) return;
+    void Promise.all(needed.map((id) => api<JourneyDetail>(`/api/journeys/${id}`).then((payload) => payload.data)))
+      .then((loaded) => {
+        if (!cancelled) setDetails((current) => ({ ...current, ...Object.fromEntries(loaded.map((detail) => [detail.id, detail])) }));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [bookmarks, details, journeys]);
+
+  const items = useMemo(() => {
+    const journeyItems: SavedItem[] = journeys.filter((journey) => !journey.hidden).map((journey) => ({
+      key: `journey:${journey.id}`,
+      kind: "journey",
+      journeyId: journey.id,
+      title: journey.title,
+      context: journey.topicLabels.join(" · ") || "Saved exploration",
+      time: journey.updatedAt,
+      performerId: journey.performerId,
+      pinned: journey.pinned,
+      sourceCount: journey.sourceCount,
+    }));
+    const questionItems: SavedItem[] = Object.entries(bookmarks).flatMap(([key, savedAt]) => {
+      const [journeyId, turnId] = key.split("::");
+      const journey = journeys.find((item) => item.id === journeyId);
+      const turn = details[journeyId]?.turns.find((item) => item.id === turnId);
+      if (!journey || !turn) return [];
+      return [{
+        key: `question:${key}`,
+        kind: "question" as const,
+        journeyId,
+        turnId,
+        title: turn.question,
+        context: `${journey.title} · ${turn.topicLabel}`,
+        time: savedAt,
+        performerId: journey.performerId,
+        pinned: false,
+        sourceCount: turn.sources.length,
+      }];
+    });
+    const normalizedQuery = query.trim().toLowerCase();
+    return [...journeyItems, ...questionItems]
+      .filter((item) => collection === "all" || (collection === "questions" ? item.kind === "question" : item.pinned))
+      .filter((item) => performer === "all" || item.performerId === performer)
+      .filter((item) => !normalizedQuery || `${item.title} ${item.context}`.toLowerCase().includes(normalizedQuery))
+      .sort((left, right) => sort === "title" ? left.title.localeCompare(right.title) : sort === "oldest" ? left.time - right.time : right.time - left.time);
+  }, [bookmarks, collection, details, journeys, performer, query, sort]);
+
+  const grouped = items.reduce<Array<{ label: string; items: SavedItem[] }>>((groups, item) => {
+    const label = timelineLabel(item.time);
+    const group = groups.find((entry) => entry.label === label);
+    if (group) group.items.push(item);
+    else groups.push({ label, items: [item] });
+    return groups;
+  }, []);
+  const questionCount = Object.keys(bookmarks).length;
+  const formatter = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
   return (
-    <section className="compare-view" aria-labelledby="compare-title">
-      <header className="view-heading">
-        <div><p className="eyebrow"><span /> {t("Manual comparison / no provider call")}</p><h1 id="compare-title">{t("Two journeys. One closer look.")}</h1></div>
-        <div><p>{t("Select two saved journeys. WonderDrive compares their committed paths, topics, and performers.")}</p></div>
+    <section className="bookmarks-view" aria-labelledby="bookmarks-title">
+      <header className="bookmarks-header">
+        <div>
+          <p className="eyebrow"><span /> Saved for later</p>
+          <h1 id="bookmarks-title">Your bookmarks</h1>
+          <p>Every trail you kept, plus the exact questions you wanted to find again.</p>
+        </div>
+        <div className="bookmark-summary" aria-label="Bookmark summary">
+          <span><strong>{journeys.filter((journey) => !journey.hidden).length}</strong> journeys</span>
+          <span><strong>{questionCount}</strong> questions</span>
+          <button type="button" onClick={onNew}>Explore something new <ArrowRight aria-hidden="true" /></button>
+        </div>
       </header>
-      {journeys.length >= 2 ? (
-        <>
-          <div className="compare-picker">
-            {journeys.map((journey, index) => {
-              const chosen = selected.includes(journey.id);
-              return (
-                <button type="button" key={journey.id} className={chosen ? "selected" : ""} aria-pressed={chosen} onClick={() => onToggle(journey.id)}>
-                  <span>{String(index + 1).padStart(2, "0")}</span><strong>{journey.title}</strong><small>{t("{count} turns", { count: journey.turnCount })} · {journey.topicLabels.join(", ")}</small><i>{chosen ? "✓" : "+"}</i>
-                </button>
-              );
-            })}
+
+      <div className="bookmark-workspace">
+        <aside className="bookmark-collections" aria-label="Collections">
+          <p>Collections</p>
+          <button type="button" className={collection === "all" ? "active" : ""} onClick={() => setCollection("all")}><span>Everything</span><b>{journeys.length + questionCount}</b></button>
+          <button type="button" className={collection === "questions" ? "active" : ""} onClick={() => setCollection("questions")}><span>Saved questions</span><b>{questionCount}</b></button>
+          <button type="button" className={collection === "pinned" ? "active" : ""} onClick={() => setCollection("pinned")}><span>Pinned journeys</span><b>{journeys.filter((journey) => journey.pinned).length}</b></button>
+          <div className="bookmark-care-note"><BookmarkSimple weight="fill" aria-hidden="true" /><p><strong>A small tip</strong>Save any answer from its question page. It will wait here with the path that led to it.</p></div>
+        </aside>
+
+        <div className="bookmark-library">
+          <div className="bookmark-tools" aria-label="Find and organize bookmarks">
+            <label className="bookmark-search"><MagnifyingGlass aria-hidden="true" /><span className="sr-only">Search bookmarks</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions, journeys, or topics" />{query && <button type="button" aria-label="Clear search" onClick={() => setQuery("")}><X aria-hidden="true" /></button>}</label>
+            <label><span>Performer</span><select value={performer} onChange={(event) => setPerformer(event.target.value as PerformerId | "all")}><option value="all">All performers</option>{PERFORMERS.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+            <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="recent">Recently saved</option><option value="oldest">Oldest first</option><option value="title">A–Z</option></select></label>
           </div>
-          <button className="compare-action" type="button" disabled={selected.length !== 2 || busy} onClick={onCompare}>{t(busy ? "Reading the paths…" : "Compare selected journeys")} <span>↘</span></button>
-          {comparison && <ComparisonReport result={comparison} />}
-        </>
-      ) : (
-        <div className="compare-empty"><p>{t("Comparison begins after two journeys exist.")}</p><button type="button" onClick={onNew}>{t("Start another drive")} →</button></div>
-      )}
+
+          <div className="bookmark-result-line"><span>{items.length} {items.length === 1 ? "item" : "items"}</span><span>Organized by when you saved or explored them</span></div>
+          {items.length ? grouped.map((group) => (
+            <section className="bookmark-time-group" key={group.label} aria-labelledby={`group-${group.label.replace(/\s/g, "-")}`}>
+              <h2 id={`group-${group.label.replace(/\s/g, "-")}`}>{group.label}</h2>
+              <div>
+                {group.items.map((item) => {
+                  const persona = PERFORMERS.find((entry) => entry.id === item.performerId)!;
+                  return (
+                    <article className={`bookmark-row ${item.kind}`} key={item.key}>
+                      <span className={`bookmark-kind ${persona.accent}`}><BookmarkSimple weight={item.kind === "question" ? "fill" : "regular"} aria-hidden="true" /></span>
+                      <div className="bookmark-copy"><p><span>{item.kind === "question" ? "Question" : "Journey"}</span>{item.context}</p><h3>{item.title}</h3><small>{formatter.format(item.time)} · {item.sourceCount} sources · with {persona.name}</small></div>
+                      <div className="bookmark-row-actions">
+                        {item.kind === "journey" ? <button type="button" className={item.pinned ? "pinned" : ""} onClick={() => onPin(item.journeyId, !item.pinned)}>{item.pinned ? "Pinned" : "Pin"}</button> : <button type="button" onClick={() => onToggle(item.journeyId, item.turnId!)}>Remove</button>}
+                        <button type="button" className="open-bookmark" onClick={() => onOpen(item.journeyId, item.turnId)}>Open <ArrowRight aria-hidden="true" /></button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )) : (
+            <div className="bookmark-empty"><BookmarkSimple aria-hidden="true" /><h2>Nothing tucked away here yet</h2><p>{query ? "Try a broader search or clear a filter." : "Save a question from any answer, or begin a new journey. We’ll keep its place for you."}</p><button type="button" onClick={query ? () => setQuery("") : onNew}>{query ? "Clear search" : "Start exploring"} <ArrowRight aria-hidden="true" /></button></div>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
 
-function ComparisonReport({ result }: { result: CompareResult }) {
-  const { t, locale } = useI18n();
-  return (
-    <section className="comparison-report" aria-labelledby="report-title">
-      <div className="report-title"><span>{t("Comparison ready")}</span><h2 id="report-title">{t("The useful difference")}</h2></div>
-      <div className="compare-columns">
-        {[result.left, result.right].map((journey, index) => (
-          <article key={journey.id}>
-            <span>{t("Path")} {index === 0 ? "A" : "B"}</span><h3>{journey.title}</h3>
-            <p>{journey.performerName} · {journey.modelName} · {journey.researchPreset}</p>
-            <p>{t("{count} turns", { count: journey.turnCount })} · {t("{count} source appearances", { count: journey.sourceCount })} · {t("{count} open branches", { count: journey.openBranchCount })} · ${journey.totalEstimatedCostUsd.toFixed(4)}</p>
-            <p>{t("{count} decisions", { count: journey.actionCount })} ({t("{count} redraws", { count: journey.rejectedCount })}, {t("{count} delegated", { count: journey.delegatedCount })})</p>
-            <ol>{journey.timeline.map((turn) => <li key={turn.turnId}><strong>{turn.question}</strong><small>{turn.topicLabel} · {new Intl.DateTimeFormat(locale).format(turn.researchedAt)}</small></li>)}</ol>
-            <div>{journey.topicLabels.map((topic) => <small key={topic}>{topic}</small>)}</div>
-          </article>
-        ))}
-      </div>
-      <div className="observations"><span>{t("What the saved data shows")}</span><ul>{result.observations.map((observation, index) => <li key={`${observation.key}-${index}`}>{t(observation.key, observation.values)}</li>)}</ul></div>
-      {!!result.confounders.length && <div className="confounders"><span>{t("Comparison cautions")}</span><ul>{result.confounders.map((item, index) => <li key={`${item.key}-${index}`}>{t(item.key, item.values)}</li>)}</ul></div>}
-    </section>
-  );
+function timelineLabel(time: number) {
+  const now = new Date();
+  const then = new Date(time);
+  if (then.toDateString() === now.toDateString()) return "Today";
+  if (now.getTime() - then.getTime() < 7 * 24 * 60 * 60 * 1000) return "This week";
+  return "Earlier";
 }
 
 function UsageView({
@@ -2173,15 +2600,19 @@ function UsageView({
     hour: "numeric",
     minute: "2-digit",
   }).format(value);
+  const researchPercent = usage?.liveResearch.limit
+    ? Math.min(100, Math.round((usage.liveResearch.used / usage.liveResearch.limit) * 100))
+    : 0;
+  const libraryPercent = usage?.library.limit
+    ? Math.min(100, Math.round((usage.library.used / usage.library.limit) * 100))
+    : 0;
 
   return (
     <section className="usage-view" aria-labelledby="usage-title">
-      <header className="view-heading">
-        <div><p className="eyebrow"><span /> {t("Rolling usage / 24 hours")}</p><h1 id="usage-title">{t("Know what is available.")}</h1></div>
-        <div>
-          <p>{usage ? t("{count} research runs ready", { count: usage.liveResearch.remaining }) : t("Reading your usage…")}</p>
-          <span>{t("Every run returns exactly 24 hours after it starts.")}</span>
-        </div>
+      <header className="usage-heading">
+        <p className="eyebrow"><span /> {t("Usage")}</p>
+        <h1 id="usage-title">{t("Your research availability")}</h1>
+        <p>{usage ? t("{count} research runs ready", { count: usage.liveResearch.remaining }) : t("Reading your usage…")}</p>
       </header>
 
       {error ? (
@@ -2189,191 +2620,379 @@ function UsageView({
       ) : loading && !usage ? (
         <div className="usage-loading" role="status">{t("Reading your rolling limits…")}</div>
       ) : usage ? (
-        <div className="usage-ledger">
-          <article className="usage-primary">
-            <header><span>{t("Live research")}</span><strong>{usage.liveResearch.used}<i>/</i>{usage.liveResearch.limit}</strong></header>
-            <progress value={usage.liveResearch.used} max={usage.liveResearch.limit} aria-label={t("Live research used in the last 24 hours")} />
-            <div className="usage-primary-copy">
-              <p>{t("{count} runs are available now.", { count: usage.liveResearch.remaining })}</p>
-              {usage.liveResearch.nextSlotAt ? (
-                <span>{t("Next slot returns {time}.", { time: time(usage.liveResearch.nextSlotAt) })}</span>
-              ) : (
-                <span>{t("You have not reached the rolling run limit.")}</span>
-              )}
+        <div className="usage-layout">
+          <article className={`usage-primary${usage.liveResearch.remaining === 0 ? " quota-reached" : ""}`}>
+            <header>
+              <div><span>{t("Live research")}</span><h2>Available now</h2></div>
+              <strong>{usage.liveResearch.remaining}<small>runs</small></strong>
+            </header>
+            <div className="usage-meter">
+              <div><span>Used: <b>{usage.liveResearch.used}</b></span><span>Limit: <b>{usage.liveResearch.limit}</b></span></div>
+              <progress value={usage.liveResearch.used} max={usage.liveResearch.limit || 1} aria-label={t("Live research used in the last 24 hours")} />
+              <p>{researchPercent}% used · {usage.liveResearch.remaining} remaining</p>
+            </div>
+            <div className="usage-reset">
+              <span>{usage.liveResearch.remaining === 0 ? "Action required" : "Next reset"}</span>
+              <p>{usage.liveResearch.nextSlotAt
+                ? t("Next slot returns {time}.", { time: time(usage.liveResearch.nextSlotAt) })
+                : t("You have not reached the rolling run limit.")}</p>
             </div>
             {!!usage.liveResearch.releasesAt.length && (
-              <div className="usage-release-list">
-                <span>{t("Upcoming slot returns")}</span>
+              <details className="usage-release-list">
+                <summary>{t("Upcoming slot returns")} ({usage.liveResearch.releasesAt.length})</summary>
                 <ol>
                   {usage.liveResearch.releasesAt.slice(0, 5).map((releaseAt, index) => (
                     <li key={`${releaseAt}-${index}`}><b>+1</b><time dateTime={new Date(releaseAt).toISOString()}>{time(releaseAt)}</time></li>
                   ))}
                 </ol>
-              </div>
+              </details>
             )}
           </article>
 
-          <article className="usage-secondary spend">
-            <span>{t("Rolling provider spend")}</span>
-            <strong>${usage.spend.usedUsd.toFixed(3)} <i>/ ${usage.spend.limitUsd.toFixed(2)}</i></strong>
-            <progress value={usage.spend.usedUsd} max={usage.spend.limitUsd} aria-label={t("Provider spend used in the last 24 hours")} />
-            <p>{usage.spend.nextReleaseAt
-              ? t("Spend begins leaving the window {time}.", { time: time(usage.spend.nextReleaseAt) })
-              : t("No metered provider spend in the current window.")}</p>
-          </article>
+          <div className="usage-secondary-column">
+            <article className="usage-secondary library-capacity">
+              <header><div><span>{t("Saved journeys")}</span><h2>Library capacity</h2></div><strong>{usage.library.remaining}<small>places left</small></strong></header>
+              <div className="usage-meter light"><div><span>Used: <b>{usage.library.used}</b></span><span>Limit: <b>{usage.library.limit}</b></span></div><progress value={usage.library.used} max={usage.library.limit || 1} aria-label={t("Saved journey capacity used")} /><p>{libraryPercent}% used · Does not reset</p></div>
+              {usage.library.remaining === 0 && <p>Delete a journey to free a place.</p>}
+              <button type="button" onClick={onOpenLibrary}>{t("Manage saved journeys")}</button>
+            </article>
 
-          <article className="usage-secondary library-capacity">
-            <span>{t("Saved journeys")}</span>
-            <strong>{usage.library.used} <i>/ {usage.library.limit}</i></strong>
-            <progress value={usage.library.used} max={usage.library.limit} aria-label={t("Saved journey capacity used")} />
-            <p>{t("This capacity does not reset every 24 hours. Delete a journey to free a place.")}</p>
-            <button type="button" onClick={onOpenLibrary}>{t("Manage saved journeys")}</button>
-          </article>
+            <details className="usage-spend">
+              <summary><span>Provider spend</span><strong>${usage.spend.usedUsd.toFixed(3)} / ${usage.spend.limitUsd.toFixed(2)}</strong></summary>
+              <progress value={usage.spend.usedUsd} max={usage.spend.limitUsd || 1} aria-label={t("Provider spend used in the last 24 hours")} />
+              <p>{usage.spend.nextReleaseAt ? t("Spend begins leaving the window {time}.", { time: time(usage.spend.nextReleaseAt) }) : t("No metered provider spend in the current window.")}</p>
+            </details>
 
-          <aside className="usage-window-note">
-            <div><span>{t("How rolling limits work")}</span><p>{t("There is no midnight reset. Each run and each dollar leaves the window 24 hours after it was recorded.")}</p></div>
-            {viewer?.mode === "guest" ? (
-              <div>
-                <span>{t("Guest session")}</span>
-                <p>{usage.guestSessionExpiresAt
-                  ? t("This browser session is scheduled to remain available until {time}.", { time: time(usage.guestSessionExpiresAt) })
-                  : t("This library belongs to this browser session.")}</p>
-                <a href="/signin-with-chatgpt?return_to=%2F">{t("Sign in to keep more across devices")} →</a>
-              </div>
-            ) : (
-              <div><span>{t("Account usage")}</span><p>{t("These limits follow your signed-in ChatGPT identity across devices.")}</p></div>
-            )}
-          </aside>
+            <aside className="usage-account">
+              <div className="usage-account-avatar" aria-hidden="true">{viewer?.displayName?.charAt(0).toUpperCase() || "W"}</div>
+              <div><span>{viewer?.mode === "guest" ? t("Guest session") : t("Account usage")}</span><strong>{viewer?.displayName || "WonderDrive user"}</strong><p>{viewer?.mode === "guest" ? "Limits and saved journeys belong to this browser session." : t("These limits follow your signed-in ChatGPT identity across devices.")}</p></div>
+              {viewer?.mode === "guest" && <a href="/signin-with-chatgpt?return_to=%2F">{t("Sign in")} →</a>}
+            </aside>
+          </div>
+
+          <details className="usage-window-note"><summary>{t("How rolling limits work")}</summary><p>{t("There is no midnight reset. Each run and each dollar leaves the window 24 hours after it was recorded.")}</p>{viewer?.mode === "guest" && usage.guestSessionExpiresAt && <p>{t("This browser session is scheduled to remain available until {time}.", { time: time(usage.guestSessionExpiresAt) })}</p>}</details>
         </div>
       ) : null}
     </section>
   );
 }
 
+function CuriosityStickerWall() {
+  const quotesPerView = 3;
+  const [firstQuoteIndex, setFirstQuoteIndex] = useState(0);
+  const hasSelectedQuotes = useRef(false);
+
+  useEffect(() => {
+    if (hasSelectedQuotes.current) return;
+    hasSelectedQuotes.current = true;
+
+    const groupCount = Math.ceil(CURIOSITY_QUOTES.length / quotesPerView);
+    const lastGroup = Number(window.sessionStorage.getItem("wonderdrive-last-quote-group"));
+    let nextGroup = Math.floor(Math.random() * groupCount);
+    if (groupCount > 1 && Number.isInteger(lastGroup) && nextGroup === lastGroup) {
+      nextGroup = (nextGroup + 1) % groupCount;
+    }
+
+    window.sessionStorage.setItem("wonderdrive-last-quote-group", String(nextGroup));
+    setFirstQuoteIndex(nextGroup * quotesPerView);
+  }, []);
+
+  const visibleQuotes = Array.from({ length: quotesPerView }, (_, offset) => (
+    CURIOSITY_QUOTES[(firstQuoteIndex + offset) % CURIOSITY_QUOTES.length]
+  ));
+
+  return (
+    <section className="curiosity-sticker-wall" aria-label="Quotes about curiosity and learning">
+      <div className="curiosity-sticker-field">
+        {visibleQuotes.map((quote) => (
+          <a
+            className={`quote-wall-sticker ${quote.tone}${quote.text.length < 36 ? " short" : quote.text.length > 90 ? " long" : ""}`}
+            href={quote.sourceUrl}
+            key={quote.id}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`${quote.text} — ${quote.attribution}. Read ${quote.sourceLabel}`}
+          >
+            <q>{quote.text}</q>
+            <span>— {quote.attribution}</span>
+            {quote.context && <small>{quote.context}</small>}
+            <i aria-hidden="true">↗</i>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CivitaiArtWindow({ reduceMotion }: { reduceMotion: boolean }) {
+  const [config] = useState(getGalleryConfig);
+  const [images, setImages] = useState<CivitaiImage[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [paused, setPaused] = useState(reduceMotion);
+
+  useEffect(() => {
+    if (!config.enabled) return;
+    const controller = new AbortController();
+    void fetchCivitaiImages(config, controller.signal)
+      .then((items) => setImages(items))
+      .catch(() => setImages([]));
+    return () => controller.abort();
+  }, [config]);
+
+  useEffect(() => {
+    if (paused || images.length < 2) return;
+    const interval = window.setInterval(
+      () => setActiveIndex((current) => (current + 1) % images.length),
+      config.intervalMs,
+    );
+    return () => window.clearInterval(interval);
+  }, [config.intervalMs, images.length, paused]);
+
+  const image = config.enabled && images.length ? images[activeIndex % images.length] : undefined;
+  const artistName = image?.username?.trim() || "Civitai community";
+  const showPrevious = () => setActiveIndex((current) => (current - 1 + images.length) % images.length);
+  const showNext = () => setActiveIndex((current) => (current + 1) % images.length);
+  return (
+    <aside className="civitai-art-window" aria-label="Rotating community artwork">
+      {image ? (
+        <a className="civitai-art-link" href={`https://civitai.com/images/${image.id}`} target="_blank" rel="noreferrer" title="View artwork on Civitai">
+          {/* The remote CDN is intentionally used directly, matching Civitai's public API guidance. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img key={`${image.id}-backdrop`} className="civitai-art-backdrop" src={image.url} alt="" aria-hidden="true" width={image.width} height={image.height} loading="eager" referrerPolicy="no-referrer" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img key={`${image.id}-artwork`} className="civitai-art-image" src={image.url} alt="" width={image.width} height={image.height} loading="eager" referrerPolicy="no-referrer" onError={() => setImages((current) => current.filter((item) => item.id !== image.id))} />
+        </a>
+      ) : <div className="curiosity-canvas" aria-hidden="true" />}
+      <div className="civitai-art-scrim" aria-hidden="true" />
+      {image && (
+        <a className="civitai-artist-credit" href={`https://civitai.com/user/${encodeURIComponent(artistName)}`} target="_blank" rel="noreferrer">
+          <span>Artwork by</span><strong>{artistName}</strong><small>Meet the artist on Civitai ↗</small>
+        </a>
+      )}
+      {images.length > 1 && (
+        <div className="civitai-art-controls" aria-label="Artwork controls">
+          <button type="button" onClick={showPrevious} aria-label="Previous artwork">←</button>
+          <button type="button" className="art-play-control" onClick={() => setPaused((current) => !current)} aria-label={paused ? "Play artwork rotation" : "Pause artwork rotation"}>
+            <span aria-hidden="true">{paused ? "▶" : "Ⅱ"}</span>{paused ? "Play" : "Pause"}
+          </button>
+          <button type="button" onClick={showNext} aria-label="Next artwork">→</button>
+        </div>
+      )}
+      {image && <span className="civitai-art-count" aria-hidden="true">{String(activeIndex + 1).padStart(2, "0")} / {String(images.length).padStart(2, "0")}</span>}
+    </aside>
+  );
+}
+
+function ArtGalleryDevSettings() {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState<CivitaiGalleryConfig>(getGalleryConfig);
+  const [sample, setSample] = useState<CivitaiImage[]>([]);
+  const [loadingTags, setLoadingTags] = useState(false);
+  const [tagSearch, setTagSearch] = useState("");
+  const [saved, setSaved] = useState(false);
+  const tags = useMemo(() => collectCivitaiTags(sample), [sample]);
+  const visibleTags = tags.filter((tag) => tag.name.toLowerCase().includes(tagSearch.trim().toLowerCase()));
+
+  async function discoverTags() {
+    setLoadingTags(true);
+    try {
+      setSample(await fetchCivitaiImages({ ...draft, includeTags: [], excludeTags: [] }));
+    } finally {
+      setLoadingTags(false);
+    }
+  }
+
+  function cycleTag(name: string) {
+    const included = draft.includeTags.includes(name);
+    const excluded = draft.excludeTags.includes(name);
+    setDraft({
+      ...draft,
+      includeTags: included ? draft.includeTags.filter((tag) => tag !== name) : excluded ? draft.includeTags : [...draft.includeTags, name],
+      excludeTags: excluded ? draft.excludeTags.filter((tag) => tag !== name) : included ? [...draft.excludeTags, name] : draft.excludeTags,
+    });
+  }
+
+  function saveConfig() {
+    saveGalleryDevOverride(draft);
+    const source = `${JSON.stringify(draft, null, 2)}\n`;
+    const url = URL.createObjectURL(new Blob([source], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "wonderdrive-art.config.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setSaved(true);
+  }
+
+  return (
+    <section className="art-dev-settings" aria-labelledby="art-dev-title">
+      <header>
+        <div>
+          <p className="eyebrow"><span /> Development only</p>
+          <h2 id="art-dev-title">{t("Art settings")}</h2>
+        </div>
+        <span className="dev-seal">Not rendered in production</span>
+      </header>
+      <div className="art-dev-grid">
+        <label className="check-setting"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span>Show gallery window</span></label>
+        <label><span>Rotation cadence</span><select value={draft.intervalMs} onChange={(event) => setDraft({ ...draft, intervalMs: Number(event.target.value) })}><option value={5000}>5 seconds</option><option value={8000}>8 seconds</option><option value={10000}>10 seconds</option><option value={12000}>12 seconds</option></select></label>
+        <label><span>Ranking</span><select value={draft.sort} onChange={(event) => setDraft({ ...draft, sort: event.target.value as CivitaiGalleryConfig["sort"] })}><option>Most Reactions</option><option>Most Comments</option><option>Most Collected</option><option>Newest</option><option>Random</option></select></label>
+        <label><span>Period</span><select value={draft.period} onChange={(event) => setDraft({ ...draft, period: event.target.value as CivitaiGalleryConfig["period"] })}><option>Day</option><option>Week</option><option>Month</option><option>Year</option><option>AllTime</option></select></label>
+        <label><span>Candidate pool</span><input type="number" min="20" max="200" value={draft.poolSize} onChange={(event) => setDraft({ ...draft, poolSize: Number(event.target.value) })} /><small>Sampled from a randomized SFW result page; filtering and shuffling happen in the browser.</small></label>
+        <label><span>Base models</span><input value={draft.baseModels.join(", ")} onChange={(event) => setDraft({ ...draft, baseModels: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} placeholder="SDXL 1.0, Flux.1 D" /><small>Optional, comma separated.</small></label>
+        <label><span>Required tag rule</span><select value={draft.includeMode} onChange={(event) => setDraft({ ...draft, includeMode: event.target.value as "any" | "all" })}><option value="any">Match any selected tag</option><option value="all">Match every selected tag</option></select></label>
+      </div>
+      <div className="tag-workbench">
+        <div className="tag-workbench-tools">
+          <div><strong>Tag workbench</strong><small>Click once to require, twice to strictly exclude, three times to clear.</small></div>
+          <input type="search" value={tagSearch} onChange={(event) => setTagSearch(event.target.value)} placeholder="Filter discovered tags…" />
+          <button type="button" disabled={loadingTags} onClick={() => void discoverTags()}>{loadingTags ? "Scanning…" : "Discover from pool"}</button>
+        </div>
+        <div className="tag-selection-summary">
+          <span><b>{draft.includeTags.length}</b> selected</span>
+          <span><b>{draft.excludeTags.length}</b> strict no</span>
+          <span><b>{tags.length}</b> discovered</span>
+        </div>
+        <div className="tag-catalog">
+          {visibleTags.length ? visibleTags.map((tag) => {
+            const state = draft.includeTags.includes(tag.name) ? "include" : draft.excludeTags.includes(tag.name) ? "exclude" : "";
+            return <button type="button" className={state} key={tag.name} onClick={() => cycleTag(tag.name)}><span>{state === "include" ? "+" : state === "exclude" ? "−" : "·"}</span>{tag.name}<small>{tag.count}</small></button>;
+          }) : <p>{sample.length ? "No tags match this search." : "Discover a live sample to build the tag catalog."}</p>}
+        </div>
+      </div>
+      <div className="art-dev-actions">
+        <p>{saved ? "Preview saved locally and JSON generated." : <>Saving applies a local dev preview and generates <code>wonderdrive-art.config.json</code>. Replace the bundled file before a production build.</>}</p>
+        <button type="button" onClick={saveConfig}>Save + generate JSON <i aria-hidden="true">↘</i></button>
+      </div>
+    </section>
+  );
+}
+
 function SettingsView({
   viewer,
+  savedJourneyCount,
   preferences,
+  catalog,
   busy,
+  onPreviewTextSize,
   onSave,
 }: {
   viewer: Viewer | null;
+  savedJourneyCount: number;
   preferences: UserPreferences;
+  catalog: BootstrapCatalog;
   busy: boolean;
+  onPreviewTextSize: (textSize: TextSize) => void;
   onSave: (next: UserPreferences) => Promise<void>;
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [draft, setDraft] = useState(preferences);
-  const [diagnostics, setDiagnostics] = useState<DiagnosticsReport | null>(null);
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const displayName = viewer?.displayName ?? t("Opening library…");
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "W";
+  const detailPreference = draft.answerDensity === "brief" ? 0 : draft.answerDensity === "balanced" ? 1 : 2;
+  const textSizeOptions: Array<{ id: TextSize; label: string }> = [
+    { id: "s", label: t("Small") },
+    { id: "m", label: t("Medium") },
+    { id: "l", label: t("Large") },
+    { id: "xl", label: t("Extra large") },
+  ];
 
-  const refreshDiagnostics = useCallback(async () => {
-    if (viewer?.mode !== "chatgpt") return;
-    setDiagnosticsLoading(true);
-    setDiagnosticsError(null);
-    try {
-      const payload = await api<DiagnosticsReport>("/api/diagnostics");
-      setDiagnostics(payload.data);
-    } catch (cause) {
-      setDiagnosticsError(messageFrom(cause));
-    } finally {
-      setDiagnosticsLoading(false);
-    }
-  }, [viewer?.mode]);
-
-  useEffect(() => {
-    if (viewer?.mode !== "chatgpt") return;
-    let cancelled = false;
-    void api<DiagnosticsReport>("/api/diagnostics")
-      .then((payload) => {
-        if (!cancelled) setDiagnostics(payload.data);
-      })
-      .catch((cause) => {
-        if (!cancelled) setDiagnosticsError(messageFrom(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [viewer?.mode]);
+  const updateDetailPreference = (value: number) => {
+    const answerDensity: AnswerDensity = value === 0 ? "brief" : value === 1 ? "balanced" : "rich";
+    setDraft({ ...draft, answerDensity });
+  };
 
   return (
     <section className="settings-view" aria-labelledby="settings-title">
-      <header className="view-heading">
-        <div><p className="eyebrow"><span /> {t("Audience controls")}</p><h1 id="settings-title">{t("Make the stage comfortable.")}</h1></div>
-        <div><p>{t(viewer?.mode === "chatgpt" ? "Synced to your ChatGPT identity" : "Saved to this guest session")}</p><span>{t("These preferences change presentation and future turns, never evidence.")}</span></div>
+      <header className="settings-heading">
+        <div>
+          <p className="eyebrow"><span /> {t("Your preferences")}</p>
+          <h1 id="settings-title">{t("Settings")}</h1>
+        </div>
+        <p>{t("Tune how WonderDrive looks and answers.")}</p>
       </header>
-      <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void onSave(draft); }}>
-        <label className="language-setting"><span>{t("Experience language")}</span><select value={draft.interfaceLocale} onChange={(event) => { const interfaceLocale = event.target.value as UserPreferences["interfaceLocale"]; const next = { ...draft, interfaceLocale, defaultOutputLocale: interfaceLocale }; setDraft(next); void onSave(next); }}>{SUPPORTED_LOCALES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select><small>{t("Changes the whole interface and future learning output.")}</small></label>
-        <label><span>{t("Default answer density")}</span><select value={draft.answerDensity} onChange={(event) => setDraft({ ...draft, answerDensity: event.target.value as AnswerDensity })}><option value="brief">{t("Brief")}</option><option value="balanced">{t("Balanced")}</option><option value="rich">{t("Rich")}</option></select><small>{t("Separate from how deeply WonderDrive researches.")}</small></label>
-        <label><span>{t("Text size")}</span><select value={draft.textSize} onChange={(event) => setDraft({ ...draft, textSize: event.target.value as TextSize })}><option value="s">{t("Small")}</option><option value="m">{t("Medium")}</option><option value="l">{t("Large")}</option><option value="xl">{t("Extra large")}</option></select></label>
-        <label><span>{t("Factual images")}</span><select value={draft.imagePreference} onChange={(event) => setDraft({ ...draft, imagePreference: event.target.value as ImagePreference })}><option value="avoid">{t("Avoid")}</option><option value="when-useful">{t("When useful")}</option><option value="prefer">{t("Prefer when supported")}</option></select><small>{t("Decorative imagery is never substituted for factual media.")}</small></label>
-        <label><span>{t("Read-aloud speed: {rate}×", { rate: draft.speechRate.toFixed(1) })}</span><input type="range" min="0.6" max="1.6" step="0.1" value={draft.speechRate} onChange={(event) => setDraft({ ...draft, speechRate: Number(event.target.value) })} /></label>
-        <label className="check-setting"><input type="checkbox" checked={draft.reduceMotion} onChange={(event) => setDraft({ ...draft, reduceMotion: event.target.checked })} /><span>{t("Reduce interface motion")}</span></label>
-        <button className="launch-button" type="submit" disabled={busy}>{t(busy ? "Saving…" : "Save preferences")}<i aria-hidden="true">↘</i></button>
-      </form>
-      <section className="diagnostics-console" aria-labelledby="diagnostics-title">
-        <header>
-          <div>
-            <p className="eyebrow"><span /> {t("Private diagnostics")}</p>
-            <h2 id="diagnostics-title">{t("What failed, where, and when.")}</h2>
+      <div className="settings-layout">
+        <aside className="account-card" aria-labelledby="account-title">
+          <span className="account-avatar" aria-hidden="true">{initials}</span>
+          <div className="account-identity">
+            <span id="account-title">{t("Account")}</span>
+            <strong>{displayName}</strong>
+            <small>{t(viewer?.mode === "chatgpt" ? "ChatGPT account" : "Guest session")}</small>
           </div>
-          {viewer?.mode === "chatgpt" && (
-            <button type="button" disabled={diagnosticsLoading} onClick={() => void refreshDiagnostics()}>
-              {t(diagnosticsLoading ? "Checking…" : "Refresh incidents")}
-            </button>
-          )}
-        </header>
-        {viewer?.mode !== "chatgpt" ? (
-          <p className="diagnostics-empty">{t("Sign in with ChatGPT to keep private, identity-scoped diagnostic history.")}</p>
-        ) : diagnosticsError ? (
-          <p className="diagnostics-empty" role="alert">{diagnosticsError}</p>
-        ) : !diagnostics ? (
-          <p className="diagnostics-empty">{t("Loading privacy-safe request health…")}</p>
-        ) : (
-          <>
-            <div className="diagnostics-summary">
-              <div><strong>{diagnostics.summary.requests24h}</strong><span>{t("requests · 24h")}</span></div>
-              <div><strong>{diagnostics.summary.failures24h}</strong><span>{t("failures · 24h")}</span></div>
-              <div><strong>{Math.round(diagnostics.summary.failureRate24h * 100)}%</strong><span>{t("failure rate")}</span></div>
-              <div><strong>{diagnostics.retentionDays}d</strong><span>{t("retention")}</span></div>
+          <dl>
+            <div><dt>{t("Saved")}</dt><dd>{savedJourneyCount} / {viewer?.journeyLimit ?? "—"}</dd></div>
+            <div><dt>{t("Preferences")}</dt><dd>{t(viewer?.mode === "chatgpt" ? "Synced" : "This device")}</dd></div>
+          </dl>
+          {viewer?.mode === "chatgpt" ? (
+            <a className="account-action danger" href="/signout-with-chatgpt?return_to=%2Fsettings">{t("Sign out")} <span aria-hidden="true">↗</span></a>
+          ) : viewer?.mode === "guest" ? (
+            <a className="account-action" href="/signin-with-chatgpt?return_to=%2Fsettings">{t("Sign in")} <span aria-hidden="true">↗</span></a>
+          ) : null}
+        </aside>
+
+        <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void onSave(draft); }}>
+          <div className="settings-select-row">
+            <label className="language-setting"><span>{t("Experience language")}</span><select value={draft.interfaceLocale} onChange={(event) => { const interfaceLocale = event.target.value as UserPreferences["interfaceLocale"]; const next = { ...draft, interfaceLocale, defaultOutputLocale: interfaceLocale }; setDraft(next); void onSave(next); }}>{SUPPORTED_LOCALES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label>
+            <label className="model-setting"><span>{t("Research model")}</span><select value={draft.defaultModelId} onChange={(event) => setDraft({ ...draft, defaultModelId: event.target.value as ModelId })}>{catalog.models.map((model) => <option key={model.id} value={model.id}>{model.name} · {model.speedBand}</option>)}</select></label>
+          </div>
+          <section className="preference-panel" aria-labelledby="answer-style-title" aria-describedby="preference-help">
+            <header className="settings-section-heading">
+              <h2 id="answer-style-title">{t("Answer style")}</h2>
+              <p id="preference-help">{t("These choices change presentation, never research quality.")}</p>
+            </header>
+            <div className="preference-scales">
+              <div className="visual-contract-setting">
+                <span>Real-world visual evidence</span>
+                <strong>Always on</strong>
+                <p>Every new answer includes at least one sourced factual image. Generated artwork is never used as evidence.</p>
+              </div>
+              <label className="preference-scale">
+                <span>{t("Answer detail")}</span>
+                <output>{t(detailPreference === 0 ? "Quick read" : detailPreference === 1 ? "Just right" : "Deep dive")}</output>
+                <input type="range" min="0" max="2" step="1" value={detailPreference} onChange={(event) => updateDetailPreference(Number(event.target.value))} aria-label={t("Preference for answer detail")} />
+                <div aria-hidden="true"><span>{t("Quick read")}</span><span>{t("Balanced")}</span><span>{t("Deep dive")}</span></div>
+              </label>
             </div>
-            {!!diagnostics.repeatedFailures.length && (
-              <div className="diagnostics-alert" role="status">
-                <strong>{t("Repeated failure detected")}</strong>
-                {diagnostics.repeatedFailures.map((item) => (
-                  <span key={item.errorCode}>{t("{code} happened {count} times in ten minutes.", { code: item.errorCode, count: item.count })}</span>
+          </section>
+          <section className="comfort-panel" aria-labelledby="comfort-title">
+            <header className="settings-section-heading">
+              <h2 id="comfort-title">{t("Comfort")}</h2>
+              <p>{t("Make the stage comfortable.")}</p>
+            </header>
+            <div className="text-size-setting">
+              <span>{t("Text size")}</span>
+              <div className="text-size-options" role="group" aria-label={t("Text size")}>
+                {textSizeOptions.map((option) => (
+                  <button
+                    type="button"
+                    key={option.id}
+                    className={draft.textSize === option.id ? "selected" : ""}
+                    aria-pressed={draft.textSize === option.id}
+                    onClick={() => {
+                      setDraft({ ...draft, textSize: option.id });
+                      onPreviewTextSize(option.id);
+                    }}
+                  >
+                    <strong>{option.label}</strong>
+                    <span className={`text-size-sample size-${option.id}`}>{t("Ask anything…")}</span>
+                  </button>
                 ))}
               </div>
-            )}
-            <div className="incident-list">
-              {diagnostics.incidents.length ? diagnostics.incidents.map((incident) => (
-                <details key={incident.diagnosticId} className="incident-row">
-                  <summary>
-                    <code>{formatDiagnosticId(incident.diagnosticId)}</code>
-                    <strong>{incident.errorCode}</strong>
-                    <span>{incident.modelId}</span>
-                    <time dateTime={new Date(incident.createdAt).toISOString()}>{new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(incident.createdAt)}</time>
-                  </summary>
-                  <dl>
-                    <div><dt>{t("Stage")}</dt><dd>{incident.stage}</dd></div>
-                    <div><dt>{t("Last provider event")}</dt><dd>{incident.lastProviderEventType}</dd></div>
-                    <div><dt>{t("Parsed events")}</dt><dd>{incident.providerEventCount}</dd></div>
-                    <div><dt>{t("Malformed events")}</dt><dd>{incident.malformedEventCount}</dd></div>
-                    <div><dt>{t("Output deltas")}</dt><dd>{incident.outputDeltaCount}</dd></div>
-                    <div><dt>{t("Provider done marker")}</dt><dd>{t(incident.sawProviderDone ? "seen" : "not seen")}</dd></div>
-                    <div><dt>{t("Latency")}</dt><dd>{incident.latencyMs ? `${(incident.latencyMs / 1000).toFixed(1)}s` : t("unrecorded")}</dd></div>
-                    <div><dt>{t("HTTP status")}</dt><dd>{incident.httpStatus ?? t("unrecorded")}</dd></div>
-                    <div><dt>{t("OpenAI request")}</dt><dd>{incident.providerRequestId ?? t("unrecorded")}</dd></div>
-                    <div><dt>{t("Preset")}</dt><dd>{incident.researchPreset}</dd></div>
-                  </dl>
-                  <p>{incident.errorMessage}</p>
-                </details>
-              )) : <p className="diagnostics-empty">{t("No failed research requests in the retained window.")}</p>}
             </div>
-            <p className="diagnostics-privacy">{t("Prompts, answers, API keys, cookies, and source contents are never included.")}</p>
-          </>
-        )}
-      </section>
+            <label className="check-setting"><input type="checkbox" checked={draft.reduceMotion} onChange={(event) => setDraft({ ...draft, reduceMotion: event.target.checked })} /><span>{t("Reduce interface motion")}</span></label>
+          </section>
+          <div className="settings-actions">
+            <small>{t(viewer?.mode === "chatgpt" ? "Synced to your ChatGPT identity" : "Saved to this guest session")}</small>
+            <button className="launch-button" type="submit" disabled={busy}>{t(busy ? "Saving…" : "Save preferences")}<i aria-hidden="true">↘</i></button>
+          </div>
+        </form>
+      </div>
+      {process.env.NODE_ENV !== "production" && <details className="art-dev-disclosure"><summary>{t("Art settings")} <span>{t("Development only")}</span></summary><ArtGalleryDevSettings /></details>}
     </section>
   );
 }
@@ -2385,7 +3004,7 @@ function LoadingStage() {
 
 function EmptyStage({ onOpenLibrary, label = "Open the journey library" }: { onOpenLibrary: () => void; label?: string }) {
   const { t } = useI18n();
-  return <section className="empty-stage"><span aria-hidden="true">?</span><h1>{t("No journey is on stage.")}</h1><p>{t("Start a new question or return to one you have already saved.")}</p><button type="button" onClick={onOpenLibrary}>{t(label)} →</button></section>;
+  return <section className="empty-stage"><span aria-hidden="true">?</span><h1>{t("No saved questions yet")}</h1><p>{t("Start a new question or return to one you have already saved.")}</p><button type="button" onClick={onOpenLibrary}>{t(label)} →</button></section>;
 }
 
 function upsertSummary(current: JourneySummary[], detail: JourneyDetail): JourneySummary[] {
