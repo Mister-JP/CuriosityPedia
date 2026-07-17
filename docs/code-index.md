@@ -22,9 +22,9 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | [`app/api/session/upgrade/route.ts`](../app/api/session/upgrade/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/viewer.ts`](../lib/viewer.ts) |
 | [`app/api/starters/route.ts`](../app/api/starters/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/product-repository.ts`](../lib/product-repository.ts)<br>[`lib/starter-recommendations.ts`](../lib/starter-recommendations.ts) |
 | [`app/api/usage/route.ts`](../app/api/usage/route.ts) | [`lib/api.ts`](../lib/api.ts)<br>[`lib/usage-summary.ts`](../lib/usage-summary.ts) |
+| [`app/bookmarks/page.tsx`](../app/bookmarks/page.tsx) | — |
 | [`app/chatgpt-auth.ts`](../app/chatgpt-auth.ts) | — |
 | [`app/client-api.ts`](../app/client-api.ts) | [`lib/contracts.ts`](../lib/contracts.ts) |
-| [`app/compare/page.tsx`](../app/compare/page.tsx) | — |
 | [`app/globals.css`](../app/globals.css) | — |
 | [`app/i18n.tsx`](../app/i18n.tsx) | [`app/locales/ar.ts`](../app/locales/ar.ts)<br>[`app/locales/bn.ts`](../app/locales/bn.ts)<br>[`app/locales/de.ts`](../app/locales/de.ts)<br>[`app/locales/fr.ts`](../app/locales/fr.ts)<br>[`app/locales/hi.ts`](../app/locales/hi.ts)<br>[`app/locales/ja.ts`](../app/locales/ja.ts)<br>[`app/locales/journey-tree.ts`](../app/locales/journey-tree.ts)<br>[`app/locales/ko.ts`](../app/locales/ko.ts)<br>[`app/locales/pt.ts`](../app/locales/pt.ts)<br>[`app/locales/zh-CN.ts`](../app/locales/zh-CN.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/i18n.ts`](../lib/i18n.ts) |
 | [`app/journeys/[journeyId]/map/page.tsx`](../app/journeys/[journeyId]/map/page.tsx) | — |
@@ -47,7 +47,7 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | [`app/routes.ts`](../app/routes.ts) | — |
 | [`app/settings/page.tsx`](../app/settings/page.tsx) | — |
 | [`app/usage/page.tsx`](../app/usage/page.tsx) | — |
-| [`app/wonderdrive-experience.tsx`](../app/wonderdrive-experience.tsx) | [`app/client-api.ts`](../app/client-api.ts)<br>[`app/i18n.tsx`](../app/i18n.tsx)<br>[`app/routes.ts`](../app/routes.ts)<br>[`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/civitai-gallery.ts`](../lib/civitai-gallery.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/i18n.ts`](../lib/i18n.ts) |
+| [`app/wonderdrive-experience.tsx`](../app/wonderdrive-experience.tsx) | [`app/client-api.ts`](../app/client-api.ts)<br>[`app/i18n.tsx`](../app/i18n.tsx)<br>[`app/routes.ts`](../app/routes.ts)<br>[`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/civitai-gallery.ts`](../lib/civitai-gallery.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/curiosity-quotes.ts`](../lib/curiosity-quotes.ts)<br>[`lib/i18n.ts`](../lib/i18n.ts) |
 | [`build/sites-vite-plugin.ts`](../build/sites-vite-plugin.ts) | — |
 | [`db/index.ts`](../db/index.ts) | — |
 | [`db/schema.ts`](../db/schema.ts) | — |
@@ -57,6 +57,7 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | [`lib/catalog.ts`](../lib/catalog.ts) | [`lib/contracts.ts`](../lib/contracts.ts) |
 | [`lib/civitai-gallery.ts`](../lib/civitai-gallery.ts) | — |
 | [`lib/contracts.ts`](../lib/contracts.ts) | — |
+| [`lib/curiosity-quotes.ts`](../lib/curiosity-quotes.ts) | — |
 | [`lib/diagnostics.ts`](../lib/diagnostics.ts) | [`db/index.ts`](../db/index.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts)<br>[`lib/errors.ts`](../lib/errors.ts)<br>[`lib/viewer.ts`](../lib/viewer.ts) |
 | [`lib/errors.ts`](../lib/errors.ts) | [`lib/contracts.ts`](../lib/contracts.ts) |
 | [`lib/fixtures.ts`](../lib/fixtures.ts) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/contracts.ts`](../lib/contracts.ts) |
@@ -94,10 +95,12 @@ Read [architecture.md](architecture.md) for system boundaries and change rules. 
 | [`scripts/generate-unified-information-loading-board.mjs`](../scripts/generate-unified-information-loading-board.mjs) | — |
 | [`tests/client-api.test.mjs`](../tests/client-api.test.mjs) | [`app/client-api.ts`](../app/client-api.ts) |
 | [`tests/cloudflare-loader.mjs`](../tests/cloudflare-loader.mjs) | — |
+| [`tests/curiosity-quotes.test.ts`](../tests/curiosity-quotes.test.ts) | [`lib/curiosity-quotes.ts`](../lib/curiosity-quotes.ts) |
 | [`tests/diagnostics.test.mjs`](../tests/diagnostics.test.mjs) | [`lib/diagnostics.ts`](../lib/diagnostics.ts) |
 | [`tests/fixtures.test.mjs`](../tests/fixtures.test.mjs) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/fixtures.ts`](../lib/fixtures.ts) |
 | [`tests/i18n.test.mjs`](../tests/i18n.test.mjs) | [`app/i18n.tsx`](../app/i18n.tsx)<br>[`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/i18n.ts`](../lib/i18n.ts) |
-| [`tests/live-research.test.mjs`](../tests/live-research.test.mjs) | [`lib/live-research.ts`](../lib/live-research.ts) |
+| [`tests/live-redraw.test.mjs`](../tests/live-redraw.test.mjs) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/live-redraw.ts`](../lib/live-redraw.ts)<br>[`lib/openai.ts`](../lib/openai.ts) |
+| [`tests/live-research.test.mjs`](../tests/live-research.test.mjs) | [`lib/catalog.ts`](../lib/catalog.ts)<br>[`lib/live-research.ts`](../lib/live-research.ts) |
 | [`tests/provider-usage.test.mjs`](../tests/provider-usage.test.mjs) | [`lib/provider-usage.ts`](../lib/provider-usage.ts) |
 | [`tests/rendered-html.test.mjs`](../tests/rendered-html.test.mjs) | — |
 | [`tests/routes.test.mjs`](../tests/routes.test.mjs) | [`app/routes.ts`](../app/routes.ts) |
