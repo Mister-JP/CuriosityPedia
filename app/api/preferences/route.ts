@@ -1,5 +1,5 @@
 import { mutation, query, readJson } from "../../../lib/api";
-import { getPreferences, updatePreferences } from "../../../lib/product-repository";
+import { getPreferences, updatePreferences } from "../../../lib/preferences-repository";
 
 export async function GET() {
   return query(getPreferences);

@@ -130,7 +130,7 @@ function openPathNode(x, y, label, question) {
   text(x + 18, y + 102, "EXPLORE THIS  →", 9, { strokeColor: "#506500" });
 }
 
-text(65, 35, "WonderDrive — reimagined journey map", 38);
+text(65, 35, "CuriosityPedia — reimagined journey map", 38);
 text(67, 88, "A decision workspace that makes the active path, earlier branches, and still-open questions immediately visible.", 17, { strokeColor: "#667085" });
 rect(1840, 42, 475, 50, { backgroundColor: "#dfff58" });
 text(1903, 57, "TURN → CHOICE → ANSWER → NEXT CHOICE", 13);
@@ -145,9 +145,9 @@ ellipse(85, 200, 10, 10, { backgroundColor: "#ff7b67", strokeWidth: 1 });
 ellipse(104, 200, 10, 10, { backgroundColor: "#ffd166", strokeWidth: 1 });
 ellipse(123, 200, 10, 10, { backgroundColor: "#81d88d", strokeWidth: 1 });
 rect(535, 193, 520, 25, { backgroundColor: "#ffffff", strokeColor: "#b7bec6", strokeWidth: 1 });
-text(695, 199, "wonderdrive.app/journey/map", 10, { strokeColor: "#667085" });
+text(695, 199, "curiositypedia.app/journey/map", 10, { strokeColor: "#667085" });
 
-text(95, 259, "WONDERDRIVE", 15);
+text(95, 259, "CURIOSITYPEDIA", 15);
 text(1110, 260, "STAGE", 10, { strokeColor: "#667085" });
 rect(1190, 246, 120, 36, { backgroundColor: "#17212b" });
 text(1226, 257, "MAP", 10, { strokeColor: "#fffdf8" });
@@ -194,7 +194,7 @@ text(130, 1133, "The default view shows one active path and two next choices. Ol
 text(1660, 145, "MOBILE · ACTIVE PATH FIRST", 14, { strokeColor: "#d64b38" });
 rect(1660, 180, 520, 1080, { backgroundColor: "#fffdf8", strokeWidth: 3, roughness: 1.45 });
 rect(1660, 180, 520, 52, { backgroundColor: "#eeeae2", strokeWidth: 2 });
-text(1685, 198, "WONDERDRIVE", 13);
+text(1685, 198, "CURIOSITYPEDIA", 13);
 text(2070, 199, "•••", 12);
 rect(1685, 252, 235, 38, { backgroundColor: "#fffdf8", strokeWidth: 1 });
 text(1776, 264, "STAGE", 10);
@@ -275,7 +275,7 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-const stem = "design/wonderdrive-journey-map-redesign";
+const stem = "design/curiositypedia-journey-map-redesign";
 fs.writeFileSync(`${stem}.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const escapeXml = (value) => value

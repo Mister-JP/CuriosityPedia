@@ -1,5 +1,5 @@
 import { mutation, query, readJson } from "../../../../lib/api";
-import { updateJourneyManagement } from "../../../../lib/product-repository";
+import { updateJourneyManagement } from "../../../../lib/journey-management-repository";
 import { deleteJourney, getJourney } from "../../../../lib/repository";
 
 type Context = { params: Promise<{ journeyId: string }> };

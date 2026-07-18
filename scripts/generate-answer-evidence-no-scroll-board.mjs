@@ -141,7 +141,7 @@ for (const crop of crops) {
   };
 }
 
-text(60, 34, "WonderDrive · full answer + visual evidence + always-visible directions", 28);
+text(60, 34, "CuriosityPedia · full answer + visual evidence + always-visible directions", 28);
 text(60, 72, "Rough Excalidraw composition · the answer, selected image, and image notes live together inside a fixed viewport", 13, { strokeColor: C.muted });
 label(1647, 47, "No page scroll", C.acid);
 
@@ -154,9 +154,9 @@ rect(pageX, pageY, pageW, pageH, { backgroundColor: C.paper, strokeColor: C.ink,
 // Global header and research status.
 rect(pageX, pageY, pageW, 64, { backgroundColor: C.surface, strokeColor: C.surface });
 ellipse(pageX + 20, pageY + 15, 34, 34, { backgroundColor: C.ink, strokeColor: C.ink });
-text(pageX + 32, pageY + 23, "W", 14, { strokeColor: C.surface });
-text(pageX + 68, pageY + 18, "WonderDrive", 14);
-text(pageX + 68, pageY + 38, "CURIOSITY, PERFORMED", 8, { strokeColor: C.muted });
+text(pageX + 32, pageY + 23, "C", 14, { strokeColor: C.surface });
+text(pageX + 68, pageY + 18, "CuriosityPedia", 14);
+text(pageX + 68, pageY + 38, "SOURCE-BACKED LEARNING", 8, { strokeColor: C.muted });
 text(pageX + 610, pageY + 25, "NEW DRIVE      LIBRARY      COMPARE      SETTINGS", 10, { strokeColor: C.muted });
 text(pageX + 1410, pageY + 25, "Jignasu Pathak", 10);
 line(pageX, pageY + 64, [[0, 0], [pageW, 0]], { strokeColor: C.line });
@@ -296,7 +296,7 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-const stem = "design/wonderdrive-answer-evidence-no-scroll";
+const stem = "design/curiositypedia-answer-evidence-no-scroll";
 fs.writeFileSync(`${stem}.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const escapeXml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");

@@ -1,4 +1,4 @@
-import bundledConfig from "../wonderdrive-art.config.json";
+import bundledConfig from "../curiositypedia-art.config.json";
 
 export type CivitaiGalleryConfig = {
   enabled: boolean;
@@ -22,8 +22,8 @@ export type CivitaiImage = {
   tags?: Array<{ id: number; name: string }>;
 };
 
-const STORAGE_KEY = "wonderdrive-art-config-dev-v1";
-const IMAGE_CACHE_KEY = "wonderdrive-art-images-v1";
+const STORAGE_KEY = "curiositypedia-art-config-dev-v1";
+const IMAGE_CACHE_KEY = "curiositypedia-art-images-v1";
 
 export const BUNDLED_GALLERY_CONFIG = bundledConfig as CivitaiGalleryConfig;
 

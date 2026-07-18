@@ -5,32 +5,32 @@ import sharp from "sharp";
 // independently editable views from its real Excalidraw frames.
 await import("./generate-infrastructure-architecture.mjs");
 
-const sourcePath = "design/wonderdrive-infrastructure-architecture.excalidraw";
+const sourcePath = "design/curiositypedia-infrastructure-architecture.excalidraw";
 const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
 const paper = source.appState.viewBackgroundColor ?? "#fbf8ef";
 
 const views = [
   {
     frameName: "1. System landscape",
-    stem: "design/wonderdrive-architecture-01-system-landscape",
+    stem: "design/curiositypedia-architecture-01-system-landscape",
     scaleX: 1.05,
     scaleY: 1.25,
   },
   {
     frameName: "2. One research turn",
-    stem: "design/wonderdrive-architecture-02-research-turn",
+    stem: "design/curiositypedia-architecture-02-research-turn",
     scaleX: 1.05,
     scaleY: 1.45,
   },
   {
-    frameName: "3. Inside WonderDrive",
-    stem: "design/wonderdrive-architecture-03-inside-wonderdrive",
+    frameName: "3. Inside CuriosityPedia",
+    stem: "design/curiositypedia-architecture-03-inside-curiositypedia",
     scaleX: 1.05,
     scaleY: 1.35,
   },
   {
     frameName: "4. Deployment topology",
-    stem: "design/wonderdrive-architecture-04-deployment-topology",
+    stem: "design/curiositypedia-architecture-04-deployment-topology",
     scaleX: 1.05,
     scaleY: 1.35,
   },

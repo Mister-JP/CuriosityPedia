@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { getChatGPTUser } from "../app/chatgpt-auth";
 import { getD1 } from "../db";
 import type { Viewer } from "./contracts";
+import { journeyLimit } from "./usage-policy";
 
 const GUEST_COOKIE = "wd_guest";
 const GUEST_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -86,7 +87,7 @@ export async function resolveViewer(): Promise<ViewerContext> {
       identityId: identity.id,
       mode: "chatgpt",
       displayName: chatGPTUser.displayName,
-      journeyLimit: 25,
+      journeyLimit: journeyLimit("chatgpt"),
       pendingGuestIdentityId,
       hasGuestUpgrade: Boolean(pendingGuestIdentityId),
     };
@@ -109,7 +110,7 @@ export async function resolveViewer(): Promise<ViewerContext> {
         identityId: identity.id,
         mode: "guest",
         displayName: "Guest explorer",
-        journeyLimit: 50,
+        journeyLimit: journeyLimit("guest"),
         // Older guest rows may not have an expiry recorded. Do not present a
         // newly calculated (and therefore endlessly moving) date as a fixed
         // session expiration.
@@ -132,7 +133,7 @@ export async function resolveViewer(): Promise<ViewerContext> {
     identityId,
     mode: "guest",
     displayName: "Guest explorer",
-    journeyLimit: 50,
+    journeyLimit: journeyLimit("guest"),
     guestExpiresAt: now + GUEST_MAX_AGE_SECONDS * 1000,
     setCookie: sessionCookie(token, requestHeaders),
   };

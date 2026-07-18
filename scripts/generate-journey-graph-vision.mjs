@@ -110,7 +110,7 @@ function beginScene(name, title, subtitle, x, y, width = 1580, height = 1010) {
   ellipse(sx + 36, sy + 18, 9, 9, { backgroundColor: "#ffd166", strokeWidth: 1 });
   ellipse(sx + 54, sy + 18, 9, 9, { backgroundColor: "#81d88d", strokeWidth: 1 });
   rect(sx + width / 2 - 230, sy + 12, 460, 23, { backgroundColor: "#ffffff", strokeColor: C.line, strokeWidth: 1 });
-  text(sx + width / 2 - 79, sy + 18, "wonderdrive.app/journey", 9, { strokeColor: C.muted });
+  text(sx + width / 2 - 79, sy + 18, "curiositypedia.app/journey", 9, { strokeColor: C.muted });
   return { name, start, x, y, sx, sy, width, height };
 }
 
@@ -123,9 +123,9 @@ function appHeader(scene, meta = "12 turns · 7 open paths") {
   const { sx, sy, width } = scene;
   rect(sx, sy + 48, width, 70, { backgroundColor: C.light, strokeWidth: 1 });
   ellipse(sx + 24, sy + 65, 36, 36, { backgroundColor: C.ink, strokeColor: C.ink, strokeWidth: 1 });
-  text(sx + 37, sy + 73, "W", 14, { strokeColor: C.light });
-  text(sx + 73, sy + 68, "WonderDrive", 16);
-  text(sx + 73, sy + 91, "CURIOSITY, PERFORMED", 9, { strokeColor: C.muted });
+  text(sx + 37, sy + 73, "C", 14, { strokeColor: C.light });
+  text(sx + 73, sy + 68, "CuriosityPedia", 16);
+  text(sx + 73, sy + 91, "SOURCE-BACKED LEARNING", 9, { strokeColor: C.muted });
   text(sx + width - 630, sy + 78, "NEW DRIVE", 9, { strokeColor: C.muted });
   text(sx + width - 525, sy + 78, "LIBRARY", 9, { strokeColor: C.muted });
   text(sx + width - 430, sy + 78, "COMPARE", 9, { strokeColor: C.muted });
@@ -375,7 +375,7 @@ function noteBar(x, y, width, title, body, number) {
   rect(s.sx + 1025, s.sy + 500, 500, 245, { backgroundColor:C.light, strokeColor:C.ink, strokeWidth:3 });
   text(s.sx + 1055, s.sy + 525, "START A NEW BRANCH?", 11, { strokeColor:"#d64b38" });
   text(s.sx + 1055, s.sy + 558, "Your current route stays intact.", 19);
-  text(s.sx + 1055, s.sy + 598, "WonderDrive will research one new turn from Turn 3.\nThe result appears as a sibling branch and becomes current.", 13);
+  text(s.sx + 1055, s.sy + 598, "CuriosityPedia will research one new turn from Turn 3.\nThe result appears as a sibling branch and becomes current.", 13);
   chip(s.sx + 1055, s.sy + 653, "1 LIVE RESEARCH TURN", C.soft, 154);
   rect(s.sx + 1055, s.sy + 696, 220, 38, { backgroundColor:C.ink, strokeColor:C.ink, strokeWidth:1 });
   text(s.sx + 1090, s.sy + 708, "START RESEARCH", 10, { strokeColor:C.light });
@@ -390,7 +390,7 @@ function noteBar(x, y, width, title, body, number) {
   // two phones inside one scene
   rect(s.sx + 85, s.sy + 95, 520, 760, { backgroundColor:C.light, strokeColor:C.ink, strokeWidth:3 });
   rect(s.sx + 85, s.sy + 95, 520, 54, { backgroundColor:"#ece8df", strokeWidth:1 });
-  text(s.sx + 110, s.sy + 114, "WONDERDRIVE", 13);
+  text(s.sx + 110, s.sy + 114, "CURIOSITYPEDIA", 13);
   text(s.sx + 535, s.sy + 114, "•••", 11);
   text(s.sx + 110, s.sy + 169, "Journey graph", 11, { strokeColor:"#d64b38" });
   text(s.sx + 110, s.sy + 195, "Turn 8 of 12 · 7 open", 18);
@@ -452,7 +452,7 @@ const drawing = {
 
 const outDir = "design/journey-graph-vision";
 fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(`${outDir}/wonderdrive-journey-graph-vision.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
+fs.writeFileSync(`${outDir}/curiositypedia-journey-graph-vision.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const escapeXml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -497,7 +497,7 @@ for (const scene of scenes) {
 
 const fullCrop = { x: 20, y: 0, width: 3300, height: 3260 };
 const fullSvg = svgFor(all, fullCrop);
-fs.writeFileSync(`${outDir}/wonderdrive-journey-graph-vision.svg`, fullSvg);
-await sharp(Buffer.from(fullSvg)).flatten({ background: C.paper }).png().toFile(`${outDir}/wonderdrive-journey-graph-vision.png`);
+fs.writeFileSync(`${outDir}/curiositypedia-journey-graph-vision.svg`, fullSvg);
+await sharp(Buffer.from(fullSvg)).flatten({ background: C.paper }).png().toFile(`${outDir}/curiositypedia-journey-graph-vision.png`);
 
 console.log(`Created ${scenes.length} UI states and one editable Excalidraw walkthrough in ${outDir}`);

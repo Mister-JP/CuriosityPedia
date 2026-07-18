@@ -23,7 +23,7 @@ const context = {
   passThroughOnException() {},
 };
 
-test("server-renders the honest WonderDrive V3 product shell", async () => {
+test("server-renders the honest CuriosityPedia V3 product shell", async () => {
   const app = await worker();
   const response = await app.fetch(
     new Request("http://localhost/", { headers: { accept: "text/html" } }),
@@ -35,10 +35,11 @@ test("server-renders the honest WonderDrive V3 product shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>WonderDrive — Give curiosity a direction<\/title>/i);
-  assert.match(html, /curiosity, performed/i);
+  assert.match(html, /<title>CuriosityPedia — Give curiosity a direction<\/title>/i);
+  assert.match(html, /CuriosityPedia/);
+  assert.doesNotMatch(html, /curiosity, performed/i);
   assert.match(html, /exactly two/i);
-  assert.match(html, /Opening your WonderDrive library/i);
+  assert.match(html, /Opening your CuriosityPedia library/i);
   assert.match(html, /Resolving a durable guest identity/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project/i);
 });
@@ -61,8 +62,8 @@ test("server-renders stable deep-link entry points", async () => {
     );
     assert.equal(response.status, 200, path);
     const html = await response.text();
-    assert.match(html, /WonderDrive/i, path);
-    assert.match(html, /Opening your WonderDrive library/i, path);
+    assert.match(html, /CuriosityPedia/i, path);
+    assert.match(html, /Opening your CuriosityPedia library/i, path);
   }
 });
 
@@ -77,7 +78,7 @@ test("exposes an explicit V3 health contract", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     status: "ok",
-    product: "WonderDrive",
+    product: "CuriosityPedia",
     phase: 3,
     capabilities: {
       publicShell: true,

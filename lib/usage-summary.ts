@@ -8,7 +8,12 @@ import {
 import type { ViewerContext } from "./viewer";
 
 type ResearchRequestRow = { created_at: number };
-type SpendRow = { spent_microusd: number; oldest_paid_at: number | null };
+type SpendRow = {
+  settled_microusd: number;
+  held_microusd: number;
+  accounted_microusd: number;
+  oldest_paid_at: number | null;
+};
 type CountRow = { count: number };
 
 export async function getUsageSummary(viewer: ViewerContext): Promise<UsageSummary> {
@@ -27,9 +32,18 @@ export async function getUsageSummary(viewer: ViewerContext): Promise<UsageSumma
       .all<ResearchRequestRow>(),
     db
       .prepare(
-        `SELECT COALESCE(SUM(estimated_cost_microusd), 0) AS spent_microusd,
-                MIN(CASE WHEN estimated_cost_microusd > 0 THEN created_at END) AS oldest_paid_at
-         FROM provider_usage_events WHERE identity_id = ? AND created_at >= ?`,
+        `SELECT
+           COALESCE(SUM(CASE WHEN status = 'settled'
+             THEN COALESCE(settled_microusd, reserved_microusd) ELSE 0 END), 0) AS settled_microusd,
+           COALESCE(SUM(CASE WHEN status IN ('reserved', 'uncertain')
+             THEN reserved_microusd ELSE 0 END), 0) AS held_microusd,
+           COALESCE(SUM(CASE
+             WHEN status = 'settled' THEN COALESCE(settled_microusd, reserved_microusd)
+             WHEN status IN ('reserved', 'uncertain') THEN reserved_microusd
+             ELSE 0 END), 0) AS accounted_microusd,
+           MIN(CASE WHEN status != 'released' AND
+             COALESCE(settled_microusd, reserved_microusd) > 0 THEN window_started_at END) AS oldest_paid_at
+         FROM provider_cost_reservations WHERE identity_id = ? AND window_started_at >= ?`,
       )
       .bind(viewer.identityId, windowStart)
       .first<SpendRow>(),
@@ -45,7 +59,9 @@ export async function getUsageSummary(viewer: ViewerContext): Promise<UsageSumma
     viewer,
     now,
     researchCreatedAt: (research.results ?? []).map((row) => numeric(row.created_at)),
-    spentMicrousd: numeric(spend?.spent_microusd),
+    settledMicrousd: numeric(spend?.settled_microusd),
+    heldMicrousd: numeric(spend?.held_microusd),
+    accountedMicrousd: numeric(spend?.accounted_microusd),
     oldestPaidAt: spend?.oldest_paid_at == null ? null : numeric(spend.oldest_paid_at),
     savedJourneys: numeric(library?.count),
   });
@@ -55,7 +71,10 @@ function mapUsageSummary(input: {
   viewer: ViewerContext;
   now: number;
   researchCreatedAt: number[];
-  spentMicrousd: number;
+  settledMicrousd?: number;
+  spentMicrousd?: number;
+  heldMicrousd?: number;
+  accountedMicrousd?: number;
   oldestPaidAt: number | null;
   savedJourneys: number;
 }): UsageSummary {
@@ -66,7 +85,11 @@ function mapUsageSummary(input: {
     .sort((left, right) => left - right);
   const used = releasesAt.length;
   const spendLimitUsd = identitySpendLimitUsd(input.viewer.mode);
-  const spentUsd = input.spentMicrousd / 1_000_000;
+  const settledUsd = numeric(input.settledMicrousd ?? input.spentMicrousd) / 1_000_000;
+  const heldUsd = numeric(input.heldMicrousd) / 1_000_000;
+  const accountedUsd = input.accountedMicrousd === undefined
+    ? settledUsd + heldUsd
+    : numeric(input.accountedMicrousd) / 1_000_000;
 
   return {
     asOf: input.now,
@@ -79,9 +102,11 @@ function mapUsageSummary(input: {
       releasesAt,
     },
     spend: {
-      usedUsd: spentUsd,
+      usedUsd: settledUsd,
+      heldUsd,
+      accountedUsd,
       limitUsd: spendLimitUsd,
-      remainingUsd: Math.max(0, spendLimitUsd - spentUsd),
+      remainingUsd: Math.max(0, spendLimitUsd - accountedUsd),
       nextReleaseAt: input.oldestPaidAt == null
         ? null
         : input.oldestPaidAt + ROLLING_USAGE_WINDOW_MS,

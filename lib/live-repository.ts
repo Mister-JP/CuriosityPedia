@@ -1,5 +1,4 @@
 import {
-  MODELS,
   PERFORMERS,
   PROMPT_VERSION,
   modelById,
@@ -26,9 +25,15 @@ import {
 } from "./request";
 import { optionStatements } from "./turn-options";
 import { normalizeLocale } from "./i18n";
-import { identitySpendLimitUsd, liveResearchLimit, ROLLING_USAGE_WINDOW_MS } from "./usage-policy";
+import {
+  isModelAllowed,
+  liveResearchLimit,
+  ROLLING_USAGE_WINDOW_MS,
+} from "./usage-policy";
 
 const PRESETS: ResearchPreset[] = ["spark", "standard", "deep"];
+export const LIVE_RESEARCH_LEASE_MS = 45_000;
+export const LIVE_RESEARCH_RENEWAL_MS = 15_000;
 
 type LivePreparation =
   | { type: "ready"; prepared: PreparedLiveResearch }
@@ -81,87 +86,40 @@ export async function prepareLiveResearch(
     );
   }
 
-  const now = Date.now();
+  const now = await databaseNow(db);
   const activeLease = await db
     .prepare(
-      `SELECT id FROM research_requests
-       WHERE identity_id = ? AND status IN ('reserved', 'researching') AND started_at >= ?
+      `SELECT id, lease_expires_at FROM research_requests
+       WHERE identity_id = ? AND status IN ('reserved', 'researching')
        ORDER BY started_at DESC LIMIT 1`,
     )
-    .bind(viewer.identityId, now - 130_000)
-    .first<{ id: string }>();
-  if (activeLease && !request.takeoverExisting) {
-    throw new RepositoryError(
-      "ALREADY_IN_PROGRESS",
-      "Another foreground research run is active for this identity. Return to that tab or wait for its lease to expire.",
-      409,
-      true,
-    );
+    .bind(viewer.identityId)
+    .first<{ id: string; lease_expires_at: number | null }>();
+  if (
+    activeLease
+    && !request.takeoverExisting
+    && activeLease.lease_expires_at !== null
+    && activeLease.lease_expires_at > now
+  ) {
+    throw activeResearchError(activeLease.id);
   }
-  if (activeLease) {
-    await db
-      .prepare(
-        `UPDATE research_requests
-         SET status = 'failed', error_code = 'TAKEN_OVER',
-             error_message = 'This run was moved to another tab.', completed_at = ?
-         WHERE id = ? AND identity_id = ? AND status IN ('reserved', 'researching')`,
-      )
-      .bind(now, activeLease.id, viewer.identityId)
-      .run();
-  }
-
-  const configuredProjectBudget = Number(process.env.WONDERDRIVE_DAILY_BUDGET_USD ?? "25");
-  const projectBudgetUsd = Number.isFinite(configuredProjectBudget) && configuredProjectBudget > 0
-    ? configuredProjectBudget
-    : 25;
-  const spend = await db
-    .prepare(
-      `SELECT COALESCE(SUM(estimated_cost_microusd), 0) AS project_spend,
-              COALESCE(SUM(CASE WHEN identity_id = ? THEN estimated_cost_microusd ELSE 0 END), 0) AS identity_spend
-       FROM provider_usage_events WHERE created_at >= ?`,
-    )
-    .bind(viewer.identityId, now - 86_400_000)
-    .first<{ project_spend: number; identity_spend: number }>();
-  const identityBudgetUsd = identitySpendLimitUsd(viewer.mode);
-  if ((spend?.project_spend ?? 0) >= projectBudgetUsd * 1_000_000) {
-    throw new RepositoryError(
-      "BUDGET_EXCEEDED",
-      "WonderDrive’s live research budget is paused for this 24-hour window.",
-      429,
-      true,
-    );
-  }
-  if ((spend?.identity_spend ?? 0) >= identityBudgetUsd * 1_000_000) {
-    throw new RepositoryError(
-      "BUDGET_EXCEEDED",
-      `This ${viewer.mode === "guest" ? "guest" : "account"} has reached its live research spend ceiling for the last 24 hours.`,
-      429,
-      true,
-    );
+  if (
+    request.takeoverExisting
+    && (!activeLease || request.takeoverRequestId !== activeLease.id)
+  ) {
+    throw takeoverLostRaceError();
   }
 
   const liveLimit = liveResearchLimit(viewer.mode);
-  const recent = await db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM research_requests
-       WHERE identity_id = ? AND created_at >= ?
-         AND status IN ('reserved', 'researching', 'committed')`,
-    )
-    .bind(viewer.identityId, Date.now() - ROLLING_USAGE_WINDOW_MS)
-    .first<{ count: number }>();
-  if ((recent?.count ?? 0) >= liveLimit) {
-    throw new RepositoryError(
-      "LIVE_RESEARCH_LIMIT",
-      `This ${viewer.mode === "guest" ? "guest" : "account"} has reached its ${liveLimit}-run live research limit for the last 24 hours.`,
-      429,
-      true,
-    );
-  }
 
   const requestId = crypto.randomUUID();
+  const leaseToken = crypto.randomUUID();
+  const supersessionMarker = crypto.randomUUID();
   const prepared: PreparedLiveResearch = {
     requestId,
+    leaseToken,
     identityId: viewer.identityId,
+    viewerMode: viewer.mode,
     kind: request.kind,
     question: normalized.question,
     seed: normalized.seed,
@@ -182,13 +140,56 @@ export async function prepareLiveResearch(
     idempotencyKey: request.idempotencyKey,
     payloadHash,
   };
+  let reservationResults: D1Result<unknown>[];
   try {
-    await db
-      .prepare(
+    const supersede = request.takeoverExisting
+      ? db.prepare(
+          `UPDATE research_requests
+           SET status = 'failed', error_code = 'TAKEN_OVER',
+               error_message = 'This run was moved to another tab.', completed_at = ?,
+               lease_token = ?, lease_expires_at = ?
+           WHERE id = ? AND identity_id = ? AND status IN ('reserved', 'researching')`,
+        ).bind(
+          now,
+          supersessionMarker,
+          now,
+          activeLease?.id ?? "",
+          viewer.identityId,
+        )
+      : db.prepare(
+          `UPDATE research_requests
+           SET status = 'failed', error_code = 'LEASE_EXPIRED',
+               error_message = 'This foreground research lease expired before completion.',
+               completed_at = ?, lease_token = ?, lease_expires_at = ?
+           WHERE id = ? AND identity_id = ? AND status IN ('reserved', 'researching')
+             AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+        ).bind(
+          now,
+          supersessionMarker,
+          now,
+          activeLease?.id ?? "",
+          viewer.identityId,
+          now,
+        );
+    const reserve = db.prepare(
         `INSERT INTO research_requests
           (id, identity_id, kind, idempotency_key, payload_hash, request_json, status,
-           started_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'researching', ?, ?)`,
+           lease_token, lease_expires_at, started_at, created_at)
+         SELECT ?, ?, ?, ?, ?, ?, 'researching', ?, ?, ?, ?
+         WHERE (
+           SELECT COUNT(*) FROM research_requests
+           WHERE identity_id = ? AND created_at >= ?
+             AND status IN ('reserved', 'researching', 'committed')
+         ) < ?
+           AND NOT EXISTS (
+             SELECT 1 FROM research_requests
+             WHERE identity_id = ? AND status IN ('reserved', 'researching')
+           )
+           AND (? = 0 OR EXISTS (
+             SELECT 1 FROM research_requests
+             WHERE id = ? AND identity_id = ? AND status = 'failed'
+               AND error_code = 'TAKEN_OVER' AND lease_token = ?
+           ))`,
       )
       .bind(
         requestId,
@@ -196,17 +197,56 @@ export async function prepareLiveResearch(
         request.kind,
         request.idempotencyKey,
         payloadHash,
-        JSON.stringify(prepared),
+        JSON.stringify(prepared, (key, value) => key === "leaseToken" ? undefined : value),
+        leaseToken,
+        now + LIVE_RESEARCH_LEASE_MS,
         now,
         now,
-      )
-      .run();
+        viewer.identityId,
+        now - ROLLING_USAGE_WINDOW_MS,
+        liveLimit,
+        viewer.identityId,
+        request.takeoverExisting ? 1 : 0,
+        activeLease?.id ?? "",
+        viewer.identityId,
+        supersessionMarker,
+      );
+    reservationResults = await db.batch([supersede, reserve]);
   } catch (error) {
     console.error("Unable to reserve live research request", error);
+    const conflictingKey = await db
+      .prepare(
+        `SELECT id FROM research_requests
+         WHERE identity_id = ? AND idempotency_key = ? LIMIT 1`,
+      )
+      .bind(viewer.identityId, request.idempotencyKey)
+      .first<{ id: string }>();
+    if (conflictingKey) {
+      throw new RepositoryError(
+        "IDEMPOTENCY_CONFLICT",
+        "That foreground research request was already reserved.",
+        409,
+        true,
+      );
+    }
+    throw activeResearchError();
+  }
+  if ((reservationResults[1]?.meta.changes ?? 0) === 0) {
+    const currentCount = await db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM research_requests
+         WHERE identity_id = ? AND created_at >= ?
+           AND status IN ('reserved', 'researching', 'committed')`,
+      )
+      .bind(viewer.identityId, now - ROLLING_USAGE_WINDOW_MS)
+      .first<{ count: number }>();
+    if ((currentCount?.count ?? 0) < liveLimit) {
+      throw request.takeoverExisting ? takeoverLostRaceError() : activeResearchError();
+    }
     throw new RepositoryError(
-      "IDEMPOTENCY_CONFLICT",
-      "That foreground research request was already reserved.",
-      409,
+      "LIVE_RESEARCH_LIMIT",
+      `This ${viewer.mode === "guest" ? "guest" : "account"} has reached its ${liveLimit}-run live research limit for the last 24 hours.`,
+      429,
       true,
     );
   }
@@ -225,24 +265,66 @@ export async function commitLiveResearch(
 
 export async function markLiveResearchFailed(
   viewer: ViewerContext,
-  requestId: string,
+  prepared: PreparedLiveResearch,
   error: unknown,
 ) {
   const repositoryError = error instanceof RepositoryError ? error : null;
   await getD1()
     .prepare(
       `UPDATE research_requests
-       SET status = 'failed', error_code = ?, error_message = ?, completed_at = ?
-       WHERE id = ? AND identity_id = ? AND status IN ('reserved', 'researching')`,
+       SET status = 'failed', error_code = ?, error_message = ?,
+           completed_at = CAST(unixepoch() * 1000 AS INTEGER)
+       WHERE id = ? AND identity_id = ? AND status IN ('reserved', 'researching')
+         AND lease_token = ?
+         AND lease_expires_at > CAST(unixepoch() * 1000 AS INTEGER)`,
     )
     .bind(
       repositoryError?.code ?? "INTERNAL_ERROR",
       (repositoryError?.message ?? "Unexpected live research failure").slice(0, 500),
-      Date.now(),
-      requestId,
+      prepared.requestId,
       viewer.identityId,
+      prepared.leaseToken,
     )
     .run();
+}
+
+export async function assertLiveResearchLease(
+  viewer: ViewerContext,
+  prepared: PreparedLiveResearch,
+) {
+  const lease = await getD1()
+    .prepare(
+      `SELECT id FROM research_requests
+       WHERE id = ? AND identity_id = ? AND status = 'researching'
+         AND lease_token = ?
+         AND lease_expires_at > CAST(unixepoch() * 1000 AS INTEGER)
+       LIMIT 1`,
+    )
+    .bind(prepared.requestId, viewer.identityId, prepared.leaseToken)
+    .first<{ id: string }>();
+  if (!lease) throw leaseLostError();
+}
+
+export async function renewLiveResearchLease(
+  viewer: ViewerContext,
+  prepared: PreparedLiveResearch,
+) {
+  const result = await getD1()
+    .prepare(
+      `UPDATE research_requests
+       SET lease_expires_at = CAST(unixepoch() * 1000 AS INTEGER) + ?
+       WHERE id = ? AND identity_id = ? AND status = 'researching'
+         AND lease_token = ?
+         AND lease_expires_at > CAST(unixepoch() * 1000 AS INTEGER)`,
+    )
+    .bind(
+      LIVE_RESEARCH_LEASE_MS,
+      prepared.requestId,
+      viewer.identityId,
+      prepared.leaseToken,
+    )
+    .run();
+  if ((result.meta.changes ?? 0) === 0) throw leaseLostError();
 }
 
 async function commitLiveCreate(
@@ -251,7 +333,7 @@ async function commitLiveCreate(
   draft: LiveTurnDraft,
 ) {
   const db = getD1();
-  await assertLiveResearchOwnsLease(db, viewer, prepared.requestId);
+  await assertLiveResearchLease(viewer, prepared);
   const now = Date.now();
   const journeyId = crypto.randomUUID();
   const turnId = crypto.randomUUID();
@@ -268,6 +350,8 @@ async function commitLiveCreate(
          WHERE EXISTS (
            SELECT 1 FROM research_requests
            WHERE id = ? AND identity_id = ? AND status = 'researching'
+             AND lease_token = ?
+             AND lease_expires_at > CAST(unixepoch() * 1000 AS INTEGER)
          )`,
       )
       .bind(
@@ -287,6 +371,7 @@ async function commitLiveCreate(
         now,
         prepared.requestId,
         viewer.identityId,
+        prepared.leaseToken,
       ),
     db
       .prepare(
@@ -322,7 +407,7 @@ async function commitLiveCreate(
         journeyId,
         viewer.identityId,
       ),
-    ...optionStatements(db, turnId, 0, draft),
+    ...optionStatements(db, turnId, 0, draft, { journeyId, persistedTurnId: turnId }),
     ...liveResearchStatements(db, prepared, draft, { journeyId, turnId, runId, now }),
     db
       .prepare(
@@ -332,6 +417,7 @@ async function commitLiveCreate(
              reasoning_tokens = ?, total_tokens = ?, web_search_calls = ?, page_fetches = ?,
              estimated_cost_microusd = ?, completed_at = ?
          WHERE id = ? AND identity_id = ? AND status = 'researching'
+           AND lease_token = ?
            AND EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
       )
       .bind(
@@ -349,6 +435,7 @@ async function commitLiveCreate(
         now,
         prepared.requestId,
         viewer.identityId,
+        prepared.leaseToken,
         turnId,
         journeyId,
       ),
@@ -359,7 +446,12 @@ async function commitLiveCreate(
            input_tokens, cached_input_tokens, output_tokens, reasoning_tokens,
            web_search_calls, page_fetches, estimated_cost_microusd, rate_effective_at,
            provider_response_id, created_at)
-         VALUES (?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         SELECT ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM research_requests
+           WHERE id = ? AND identity_id = ? AND status = 'committed'
+             AND result_journey_id = ? AND result_turn_id = ?
+         )`,
       )
       .bind(
         crypto.randomUUID(),
@@ -378,9 +470,14 @@ async function commitLiveCreate(
         draft.usage.rateEffectiveAt,
         draft.providerResponseId,
         now,
+        prepared.requestId,
+        viewer.identityId,
+        journeyId,
+        turnId,
       ),
   ];
   const results = await db.batch(statements);
+  assertFencedRoot(results[0]);
   assertChanged(results.at(-1));
   return getJourney(viewer, journeyId);
 }
@@ -398,28 +495,12 @@ async function commitLiveAdvance(
     throw new RepositoryError("INTERNAL_ERROR", "The live turn reservation was incomplete.", 500);
   }
   const db = getD1();
-  await assertLiveResearchOwnsLease(db, viewer, prepared.requestId);
+  await assertLiveResearchLease(viewer, prepared);
   const now = Date.now();
   const childId = crypto.randomUUID();
   const runId = crypto.randomUUID();
   const actionId = crypto.randomUUID();
   const statements: D1PreparedStatement[] = [
-    db
-      .prepare(
-        `UPDATE turn_options SET state = 'proposed'
-         WHERE turn_id = ?
-           AND EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
-             AND version = ? AND deleted_at IS NULL)`,
-      )
-      .bind(fromTurnId, journeyId, viewer.identityId, expectedVersion),
-    db
-      .prepare(
-        `UPDATE turn_options SET state = 'chosen'
-         WHERE id = ? AND turn_id = ?
-           AND EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
-             AND version = ? AND deleted_at IS NULL)`,
-      )
-      .bind(selectedOptionId, fromTurnId, journeyId, viewer.identityId, expectedVersion),
     db
       .prepare(
         `INSERT INTO turns
@@ -430,7 +511,13 @@ async function commitLiveAdvance(
          SELECT ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, NULL, 0,
                 'openai', ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
-           AND version = ? AND deleted_at IS NULL)`,
+           AND version = ? AND deleted_at IS NULL)
+           AND EXISTS (
+             SELECT 1 FROM research_requests
+             WHERE id = ? AND identity_id = ? AND status = 'researching'
+               AND lease_token = ?
+               AND lease_expires_at > CAST(unixepoch() * 1000 AS INTEGER)
+           )`,
       )
       .bind(
         childId,
@@ -457,19 +544,33 @@ async function commitLiveAdvance(
         journeyId,
         viewer.identityId,
         expectedVersion,
+        prepared.requestId,
+        viewer.identityId,
+        prepared.leaseToken,
       ),
+    db
+      .prepare(
+        `UPDATE turn_options SET state = 'proposed'
+         WHERE turn_id = ?
+           AND EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
+      )
+      .bind(fromTurnId, childId, journeyId),
+    db
+      .prepare(
+        `UPDATE turn_options SET state = 'chosen'
+         WHERE id = ? AND turn_id = ?
+           AND EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
+      )
+      .bind(selectedOptionId, fromTurnId, childId, journeyId),
     ...optionStatements(db, childId, 0, draft, {
       journeyId,
-      identityId: viewer.identityId,
-      expectedVersion,
+      persistedTurnId: childId,
     }),
     ...conditionalLiveResearchStatements(
       db,
       prepared,
       draft,
       { journeyId, turnId: childId, runId, now },
-      viewer.identityId,
-      expectedVersion,
     ),
     db
       .prepare(
@@ -477,8 +578,7 @@ async function commitLiveAdvance(
           (id, journey_id, turn_id, kind, option_id, idempotency_key, payload_hash,
            result_turn_id, metadata_json, created_at)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-         WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
-           AND version = ? AND deleted_at IS NULL)`,
+         WHERE EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
       )
       .bind(
         actionId,
@@ -491,9 +591,8 @@ async function commitLiveAdvance(
         childId,
         JSON.stringify({ branched: prepared.branched, live: true }),
         now,
+        childId,
         journeyId,
-        viewer.identityId,
-        expectedVersion,
       ),
     db
       .prepare(
@@ -545,8 +644,8 @@ async function commitLiveAdvance(
              reasoning_tokens = ?, total_tokens = ?, web_search_calls = ?, page_fetches = ?,
              estimated_cost_microusd = ?, completed_at = ?
          WHERE id = ? AND identity_id = ? AND status = 'researching'
-           AND EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
-             AND version = ? AND deleted_at IS NULL)`,
+           AND lease_token = ?
+           AND EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
       )
       .bind(
         draft.providerResponseId,
@@ -563,9 +662,9 @@ async function commitLiveAdvance(
         now,
         prepared.requestId,
         viewer.identityId,
+        prepared.leaseToken,
+        childId,
         journeyId,
-        viewer.identityId,
-        expectedVersion,
       ),
     db
       .prepare(
@@ -573,7 +672,8 @@ async function commitLiveAdvance(
          SET current_turn_id = ?, turn_count = turn_count + 1,
              source_count = source_count + ?, version = version + 1,
              model_id = ?, last_action = ?, status = 'active', updated_at = ?
-         WHERE id = ? AND owner_identity_id = ? AND version = ? AND deleted_at IS NULL`,
+         WHERE id = ? AND owner_identity_id = ? AND version = ? AND deleted_at IS NULL
+           AND EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
       )
       .bind(
         childId,
@@ -584,6 +684,8 @@ async function commitLiveAdvance(
         journeyId,
         viewer.identityId,
         expectedVersion,
+        childId,
+        journeyId,
       ),
     db
       .prepare(
@@ -619,30 +721,9 @@ async function commitLiveAdvance(
       ),
   ];
   const results = await db.batch(statements);
+  assertFencedRoot(results[0]);
   assertChanged(results.at(-1));
   return getJourney(viewer, journeyId);
-}
-
-async function assertLiveResearchOwnsLease(
-  db: D1Database,
-  viewer: ViewerContext,
-  requestId: string,
-) {
-  const request = await db
-    .prepare(
-      `SELECT status FROM research_requests
-       WHERE id = ? AND identity_id = ? LIMIT 1`,
-    )
-    .bind(requestId, viewer.identityId)
-    .first<{ status: string }>();
-  if (request?.status !== "researching") {
-    throw new RepositoryError(
-      "ALREADY_IN_PROGRESS",
-      "This research run was moved to another tab before it could be saved.",
-      409,
-      false,
-    );
-  }
 }
 
 function liveResearchStatements(
@@ -659,7 +740,8 @@ function liveResearchStatements(
            provider_response_id, input_tokens, cached_input_tokens, output_tokens,
            reasoning_tokens, total_tokens, web_search_calls, page_fetches, latency_ms,
            estimated_cost_microusd, rate_effective_at, started_at, completed_at, created_at)
-         VALUES (?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         SELECT ?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
       )
       .bind(
         ids.runId,
@@ -681,9 +763,11 @@ function liveResearchStatements(
         ids.now - draft.usage.latencyMs,
         ids.now,
         ids.now,
+        ids.turnId,
+        ids.journeyId,
       ),
   ];
-  appendEvidenceStatements(statements, db, draft, ids, false);
+  appendEvidenceStatements(statements, db, draft, ids, true);
   return statements;
 }
 
@@ -692,8 +776,6 @@ function conditionalLiveResearchStatements(
   prepared: PreparedLiveResearch,
   draft: LiveTurnDraft,
   ids: { journeyId: string; turnId: string; runId: string; now: number },
-  identityId: string,
-  expectedVersion: number,
 ) {
   const statements: D1PreparedStatement[] = [
     db
@@ -704,8 +786,7 @@ function conditionalLiveResearchStatements(
            reasoning_tokens, total_tokens, web_search_calls, page_fetches, latency_ms,
            estimated_cost_microusd, rate_effective_at, started_at, completed_at, created_at)
          SELECT ?, ?, ?, 'openai', ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-         WHERE EXISTS (SELECT 1 FROM journeys WHERE id = ? AND owner_identity_id = ?
-           AND version = ? AND deleted_at IS NULL)`,
+         WHERE EXISTS (SELECT 1 FROM turns WHERE id = ? AND journey_id = ?)`,
       )
       .bind(
         ids.runId,
@@ -727,9 +808,8 @@ function conditionalLiveResearchStatements(
         ids.now - draft.usage.latencyMs,
         ids.now,
         ids.now,
+        ids.turnId,
         ids.journeyId,
-        identityId,
-        expectedVersion,
       ),
   ];
   appendEvidenceStatements(statements, db, draft, ids, true);
@@ -809,9 +889,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
     if (!PERFORMERS.some((performer) => performer.id === request.performerId)) {
       throw new RepositoryError("BAD_REQUEST", "Choose a supported performer.", 400);
     }
-    if (
-      !MODELS.some((model) => model.id === request.modelId && model.mode === "live")
-    ) {
+    if (!isModelAllowed(viewer.mode, request.modelId)) {
       throw new RepositoryError("BAD_REQUEST", "Choose the supported live research model.", 400);
     }
     if (!PRESETS.includes(request.researchPreset)) {
@@ -879,7 +957,7 @@ async function normalizeRequest(viewer: ViewerContext, request: LiveResearchRequ
   }
   const journey = await getJourney(viewer, request.journeyId);
   const modelId = request.modelId ?? journey.modelId;
-  if (!MODELS.some((model) => model.id === modelId && model.mode === "live")) {
+  if (!isModelAllowed(viewer.mode, modelId)) {
     throw new RepositoryError(
       "BAD_REQUEST",
       "This saved journey uses a model that is no longer available for live research.",
@@ -955,4 +1033,51 @@ function assertChanged(result: D1Result<unknown> | undefined) {
       true,
     );
   }
+}
+
+function assertFencedRoot(result: D1Result<unknown> | undefined) {
+  if (!result || (result.meta.changes ?? 0) === 0) throw leaseLostError();
+}
+
+async function databaseNow(db: D1Database) {
+  const row = await db
+    .prepare("SELECT CAST(unixepoch() * 1000 AS INTEGER) AS now")
+    .first<{ now: number }>();
+  if (typeof row?.now !== "number") {
+    throw new RepositoryError(
+      "INTERNAL_ERROR",
+      "Live research could not read the database clock.",
+      500,
+      true,
+    );
+  }
+  return row.now;
+}
+
+function activeResearchError(requestId?: string) {
+  return new RepositoryError(
+    "ALREADY_IN_PROGRESS",
+    "Another foreground research run is active for this identity. Return to that tab or wait for its lease to expire.",
+    409,
+    true,
+    requestId,
+  );
+}
+
+function takeoverLostRaceError() {
+  return new RepositoryError(
+    "ALREADY_IN_PROGRESS",
+    "The previous research run already finished or another tab took it over. Refresh before trying again.",
+    409,
+    false,
+  );
+}
+
+function leaseLostError() {
+  return new RepositoryError(
+    "ALREADY_IN_PROGRESS",
+    "This research run was moved to another tab or its lease expired before it could be saved.",
+    409,
+    false,
+  );
 }

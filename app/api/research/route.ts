@@ -4,13 +4,18 @@ import type {
   LiveResearchStreamEvent,
 } from "../../../lib/contracts";
 import {
+  assertLiveResearchLease,
   commitLiveResearch,
+  LIVE_RESEARCH_RENEWAL_MS,
   markLiveResearchFailed,
   prepareLiveResearch,
+  renewLiveResearchLease,
 } from "../../../lib/live-repository";
 import { runLiveResearch } from "../../../lib/live-research";
+import type { PreparedLiveResearch } from "../../../lib/live-research";
 import { publicError, RepositoryError } from "../../../lib/errors";
 import { publicViewer, resolveViewer } from "../../../lib/viewer";
+import type { ViewerContext } from "../../../lib/viewer";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +27,31 @@ function retryDelay(attempt: number) {
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function startLeaseKeeper(
+  viewer: ViewerContext,
+  prepared: PreparedLiveResearch,
+  abortController: AbortController,
+) {
+  let stopped = false;
+  let renewing = false;
+  const renew = async () => {
+    if (stopped || renewing || abortController.signal.aborted) return;
+    renewing = true;
+    try {
+      await renewLiveResearchLease(viewer, prepared);
+    } catch {
+      abortController.abort("Foreground research lease ownership was lost");
+    } finally {
+      renewing = false;
+    }
+  };
+  const interval = setInterval(() => void renew(), LIVE_RESEARCH_RENEWAL_MS);
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+  };
 }
 
 export async function POST(request: Request) {
@@ -71,14 +101,20 @@ export async function POST(request: Request) {
             return;
           }
           let retriesUsed = 0;
+          const stopLeaseKeeper = startLeaseKeeper(
+            viewer,
+            preparation.prepared,
+            abortController,
+          );
           try {
             let draft: Awaited<ReturnType<typeof runLiveResearch>> | undefined;
             while (!draft) {
               try {
                 draft = await runLiveResearch(
-                  preparation.prepared,
+                  { ...preparation.prepared, providerAttempt: retriesUsed },
                   (event) => send({ type: "activity", event }),
                   abortController.signal,
+                  () => assertLiveResearchLease(viewer, preparation.prepared),
                 );
               } catch (error) {
                 const retryable = error instanceof RepositoryError ? error.retryable : true;
@@ -96,27 +132,29 @@ export async function POST(request: Request) {
                 if (abortController.signal.aborted) throw error;
               }
             }
+            await assertLiveResearchLease(viewer, preparation.prepared);
             const journey = await commitLiveResearch(viewer, preparation.prepared, draft);
             send({ type: "complete", data: journey, viewer: publicViewer(viewer) });
           } catch (error) {
-            await markLiveResearchFailed(viewer, preparation.prepared.requestId, error);
+            await markLiveResearchFailed(viewer, preparation.prepared, error);
             if (!closed) {
               const failure = publicError(
                 error,
-                "WonderDrive could not complete live research. No partial journey was saved.",
+                "CuriosityPedia could not complete live research. No partial journey was saved.",
               );
               send({
                 type: "error",
                 error: {
                   ...failure,
                   message: retriesUsed === MAX_RETRIES
-                    ? `${failure.message} WonderDrive tried ${MAX_RETRIES} automatic retries before stopping.`
+                    ? `${failure.message} CuriosityPedia tried ${MAX_RETRIES} automatic retries before stopping.`
                     : failure.message,
                   diagnosticId: preparation.prepared.requestId,
                 },
               });
             }
           } finally {
+            stopLeaseKeeper();
             clearInterval(heartbeat);
             if (!closed) {
               closed = true;

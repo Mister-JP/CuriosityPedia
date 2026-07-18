@@ -107,7 +107,7 @@ function endScene(scene) {
 function phone(x, y, title, meta) {
   rect(x, y, 430, 820, { backgroundColor: C.light, strokeColor: C.ink, strokeWidth: 3 });
   rect(x, y, 430, 50, { backgroundColor: "#ece8df", strokeColor: C.ink, strokeWidth: 1 });
-  text(x + 20, y + 17, "WONDERDRIVE", 12);
+  text(x + 20, y + 17, "CURIOSITYPEDIA", 12);
   text(x + 378, y + 16, "•••", 10);
   rect(x, y + 50, 430, 76, { backgroundColor: C.soft, strokeColor: C.line, strokeWidth: 1 });
   text(x + 18, y + 65, title, 16);
@@ -349,7 +349,7 @@ const drawing = {
 
 const outDir = "design/journey-graph-vision/mobile-v2";
 fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(`${outDir}/wonderdrive-mobile-tree-v2.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
+fs.writeFileSync(`${outDir}/curiositypedia-mobile-tree-v2.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const escapeXml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 function svgFor(items, crop) {
@@ -392,6 +392,6 @@ for (const scene of scenes) {
 }
 
 const fullSvg = svgFor(elements, { x:20, y:0, width:2770, height:3190 });
-fs.writeFileSync(`${outDir}/wonderdrive-mobile-tree-v2.svg`, fullSvg);
-await sharp(Buffer.from(fullSvg)).flatten({ background:C.paper }).png().toFile(`${outDir}/wonderdrive-mobile-tree-v2.png`);
+fs.writeFileSync(`${outDir}/curiositypedia-mobile-tree-v2.svg`, fullSvg);
+await sharp(Buffer.from(fullSvg)).flatten({ background:C.paper }).png().toFile(`${outDir}/curiositypedia-mobile-tree-v2.png`);
 console.log(`Created ${scenes.length} mobile tree states in ${outDir}`);

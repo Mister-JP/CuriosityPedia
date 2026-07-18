@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return Response.json({
     status: "ok",
-    product: "WonderDrive",
+    product: "CuriosityPedia",
     phase: 3,
     capabilities: {
       publicShell: true,

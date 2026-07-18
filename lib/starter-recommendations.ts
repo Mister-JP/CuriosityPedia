@@ -13,6 +13,7 @@ import {
 } from "./openai";
 import { hashPayload } from "./request";
 import { recordOpenAIUsage } from "./provider-usage";
+import { reserveProviderCost } from "./provider-cost-control";
 import { localeName } from "./i18n";
 
 const STARTER_SCHEMA = {
@@ -64,46 +65,58 @@ export async function getPersonalizedStarters(
   const startedAt = Date.now();
   const purpose = options.refresh ? "manual_refresh" : "cache_miss_or_expired";
   let usageRecorded = false;
+  let costReservationId: string | undefined;
+  const requestBody = {
+    model: "gpt-5.6-luna",
+    instructions: [
+      `CuriosityPedia prompt ${PROMPT_VERSION}. Create 24 short, playful starting questions for a learner's curiosity ticker.`,
+      "First use web search to scan what is unfolding now across science, computing, space, climate, engineering, archaeology, biology, mathematics, infrastructure, and other knowledge-rich domains.",
+      "Ground current developments in sources qualified to establish them, favoring original announcements or data and reputable independent reporting over novelty alone.",
+      "Use current events as trapdoors into durable ideas, not as disposable headlines. Prefer strange abilities, surprising cause-and-effect, tiny mysteries, vivid comparisons, and hidden ways everyday things work.",
+      "Use only the ordered topic history supplied below as personalization context. Treat past topics as signs of curiosity, not evidence of knowledge or proficiency. Do not infer private traits, repeat earlier questions, or mention personalization.",
+      `Use the ${performer.name} cue as a light editorial lens that changes what you notice and prioritize, not as character roleplay: ${performer.cue}`,
+      `Voice: ${performer.voiceTraits.join(", ")}. Values: ${performer.values.join(", ")}. Avoid: ${performer.avoids.join(", ")}.`,
+      `Question posture: ${performer.questionPosture}`,
+      "Mix roughly eight history-adjacent rabbit holes, eight questions sparked by current developments, and eight lateral departures. If there is no history, redistribute those slots across current signals and wildly varied domains.",
+      "Every question must be researchable, vivid, meaningfully different, and specific enough to spark a rabbit hole. Write it as a doorway for a curious beginner of any age who may never have encountered the subject: they should not know the answer, but should immediately understand what the question is asking. Use the natural-language length of 5–12 English words with the output language's normal segmentation and syntax, plain everyday language, one idea at a time, and wording that is fun to say out loud.",
+      performer.id === "atlas"
+        ? "Prefer concrete real-world subjects and verified hooks: 'Why do astronauts grow taller in space?', 'How did cholera maps change public health?', or 'What lets geckos walk across ceilings?' Avoid hypothetical premises, academic framing, jargon, stacked clauses, vague abstraction, self-help, listicles, celebrity news, and quiz-like recall."
+        : "Prefer concrete subjects and a surprising hook: 'Can trees warn each other about bugs?', 'Why do astronauts grow taller in space?', or 'Could a mushroom help build a house?' Avoid academic framing, jargon, stacked clauses, vague abstraction, self-help, listicles, celebrity news, and quiz-like recall.",
+      "Do not ask directly about breaking tragedy or turn human suffering into entertainment. Label topics with the underlying domain, not a news outlet or headline.",
+      `Write every question and topic label in ${localeName(outputLocale)} (${outputLocale}). Search may use sources in any language.`,
+      "Return structured output only.",
+    ].join("\n"),
+    input: [
+      `Current discovery scan requested at ${new Date().toISOString()}.`,
+      topics.length
+        ? `Topics this learner has explored, oldest to newest:\n${topics.map((topic, index) => `${index + 1}. ${topic}`).join("\n")}`
+        : "This learner has no topic history yet. Offer a broad, varied first set.",
+    ].join("\n\n"),
+    max_output_tokens: OPENAI_PROMPT_LIMITS.starterGeneration.maxOutputTokens,
+    tools: [{ type: "web_search" }],
+    tool_choice: "auto",
+    max_tool_calls: 2,
+    reasoning: { effort: OPENAI_PROMPT_LIMITS.starterGeneration.reasoning },
+    text: structuredOutput("curiositypedia_starters", STARTER_SCHEMA),
+    safety_identifier: `wd_starters_${viewer.identityId}`.slice(0, 64),
+    store: false,
+  };
   try {
-    const response = await requestOpenAI({
-        model: "gpt-5.6-luna",
-        instructions: [
-          `WonderDrive prompt ${PROMPT_VERSION}. Create 24 short, playful starting questions for a learner's curiosity ticker.`,
-          "First use web search to scan what is unfolding now across science, computing, space, climate, engineering, archaeology, biology, mathematics, infrastructure, and other knowledge-rich domains.",
-          "Ground current developments in sources qualified to establish them, favoring original announcements or data and reputable independent reporting over novelty alone.",
-          "Use current events as trapdoors into durable ideas, not as disposable headlines. Prefer strange abilities, surprising cause-and-effect, tiny mysteries, vivid comparisons, and hidden ways everyday things work.",
-          "Use only the ordered topic history supplied below as personalization context. Treat past topics as signs of curiosity, not evidence of knowledge or proficiency. Do not infer private traits, repeat earlier questions, or mention personalization.",
-          `Use the ${performer.name} cue as a light editorial lens that changes what you notice and prioritize, not as character roleplay: ${performer.cue}`,
-          `Voice: ${performer.voiceTraits.join(", ")}. Values: ${performer.values.join(", ")}. Avoid: ${performer.avoids.join(", ")}.`,
-          `Question posture: ${performer.questionPosture}`,
-          "Mix roughly eight history-adjacent rabbit holes, eight questions sparked by current developments, and eight lateral departures. If there is no history, redistribute those slots across current signals and wildly varied domains.",
-          "Every question must be researchable, vivid, meaningfully different, and specific enough to spark a rabbit hole. Write it as a doorway for a curious beginner of any age who may never have encountered the subject: they should not know the answer, but should immediately understand what the question is asking. Use the natural-language length of 5–12 English words with the output language's normal segmentation and syntax, plain everyday language, one idea at a time, and wording that is fun to say out loud.",
-          performer.id === "atlas"
-            ? "Prefer concrete real-world subjects and verified hooks: 'Why do astronauts grow taller in space?', 'How did cholera maps change public health?', or 'What lets geckos walk across ceilings?' Avoid hypothetical premises, academic framing, jargon, stacked clauses, vague abstraction, self-help, listicles, celebrity news, and quiz-like recall."
-            : "Prefer concrete subjects and a surprising hook: 'Can trees warn each other about bugs?', 'Why do astronauts grow taller in space?', or 'Could a mushroom help build a house?' Avoid academic framing, jargon, stacked clauses, vague abstraction, self-help, listicles, celebrity news, and quiz-like recall.",
-          "Do not ask directly about breaking tragedy or turn human suffering into entertainment. Label topics with the underlying domain, not a news outlet or headline.",
-          `Write every question and topic label in ${localeName(outputLocale)} (${outputLocale}). Search may use sources in any language.`,
-          "Return structured output only.",
-        ].join("\n"),
-        input: [
-          `Current discovery scan requested at ${new Date().toISOString()}.`,
-          topics.length
-            ? `Topics this learner has explored, oldest to newest:\n${topics.map((topic, index) => `${index + 1}. ${topic}`).join("\n")}`
-            : "This learner has no topic history yet. Offer a broad, varied first set.",
-        ].join("\n\n"),
-        max_output_tokens: OPENAI_PROMPT_LIMITS.starterGeneration.maxOutputTokens,
-        tools: [{ type: "web_search" }],
-        tool_choice: "auto",
-        max_tool_calls: 2,
-        reasoning: { effort: OPENAI_PROMPT_LIMITS.starterGeneration.reasoning },
-        text: structuredOutput("wonderdrive_starters", STARTER_SCHEMA),
-        safety_identifier: `wd_starters_${viewer.identityId}`.slice(0, 64),
-        store: false,
+    const reservation = await reserveProviderCost({
+      callKey: `starter:${viewer.identityId}:${historyHash}:${crypto.randomUUID()}`,
+      identityId: viewer.identityId,
+      viewerMode: viewer.mode,
+      modelId: "gpt-5.6-luna",
+      operation: "starter_generation",
+      requestBody,
     });
+    costReservationId = reservation.id;
+    const response = await requestOpenAI(requestBody);
     if (!response.ok) {
       usageRecorded = true;
       await recordOpenAIUsage({
         identityId: viewer.identityId,
+        costReservationId,
         modelId: "gpt-5.6-luna",
         operation: "starter_generation",
         purpose,
@@ -123,6 +136,7 @@ export async function getPersonalizedStarters(
       usageRecorded = true;
       await recordOpenAIUsage({
         identityId: viewer.identityId,
+        costReservationId,
         modelId: "gpt-5.6-luna",
         operation: "starter_generation",
         purpose,
@@ -141,6 +155,7 @@ export async function getPersonalizedStarters(
     usageRecorded = true;
     await recordOpenAIUsage({
       identityId: viewer.identityId,
+      costReservationId,
       modelId: "gpt-5.6-luna",
       operation: "starter_generation",
       purpose,
@@ -172,9 +187,10 @@ export async function getPersonalizedStarters(
       .run();
     return generated;
   } catch (error) {
-    if (!usageRecorded) {
+    if (!usageRecorded && costReservationId) {
       await recordOpenAIUsage({
         identityId: viewer.identityId,
+        costReservationId,
         modelId: "gpt-5.6-luna",
         operation: "starter_generation",
         purpose,
@@ -185,7 +201,7 @@ export async function getPersonalizedStarters(
         metadata: { performerId, forcedRefresh: Boolean(options.refresh) },
       });
     }
-    console.error("WonderDrive starter generation failed", error);
+    console.error("CuriosityPedia starter generation failed", error);
     return fallbackStarters(performerId);
   }
 }

@@ -10,10 +10,10 @@
 <ellipse cx="1740.5" cy="2300.5" rx="4.5" ry="4.5" fill="#ffd166" stroke="#15261f" stroke-width="1" opacity="1"/>
 <ellipse cx="1758.5" cy="2300.5" rx="4.5" ry="4.5" fill="#81d88d" stroke="#15261f" stroke-width="1" opacity="1"/>
 <rect x="2260" y="2290" width="460" height="23" rx="6" fill="#ffffff" stroke="#bfc8c2" stroke-width="1" opacity="1" />
-<text x="2411" y="2305" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="2411" dy="0">wonderdrive.app/journey</tspan></text>
+<text x="2411" y="2305" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="2411" dy="0">curiositypedia.app/journey</tspan></text>
 <rect x="1785" y="2373" width="520" height="760" rx="6" fill="#fffdf8" stroke="#15261f" stroke-width="3" opacity="1" />
 <rect x="1785" y="2373" width="520" height="54" rx="6" fill="#ece8df" stroke="#15261f" stroke-width="1" opacity="1" />
-<text x="1810" y="2405" fill="#15261f" font-size="13" font-weight="500" opacity="1"><tspan x="1810" dy="0">WONDERDRIVE</tspan></text>
+<text x="1810" y="2405" fill="#15261f" font-size="13" font-weight="500" opacity="1"><tspan x="1810" dy="0">CURIOSITYPEDIA</tspan></text>
 <text x="2235" y="2403" fill="#15261f" font-size="11" font-weight="500" opacity="1"><tspan x="2235" dy="0">•••</tspan></text>
 <text x="1810" y="2458" fill="#d64b38" font-size="11" font-weight="500" opacity="1"><tspan x="1810" dy="0">Journey graph</tspan></text>
 <text x="1810" y="2491" fill="#15261f" font-size="18" font-weight="500" opacity="1"><tspan x="1810" dy="0">Turn 8 of 12 · 7 open</tspan></text>

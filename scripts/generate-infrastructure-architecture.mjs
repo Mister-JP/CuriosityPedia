@@ -175,13 +175,13 @@ function sticky(x, y, w, h, title, body, o = {}) {
   });
 }
 
-text(55, 34, "WonderDrive architecture", 44);
+text(55, 34, "CuriosityPedia architecture", 44);
 text(58, 92, "Three views, three questions: what connects, how a turn runs, and what lives inside the app", 18, { strokeColor: C.muted });
 rect(1860, 42, 310, 48, { backgroundColor: C.lime, strokeWidth: 2, roughness: 2.7, angle: -0.01 });
 text(1890, 57, "CURRENT: CHATGPT SITES + OPENAI + D1", 11, { angle: -0.01 });
 
 // FRAME 1 — system context.
-frame(55, 145, 2120, 500, "1", "System landscape", "The five-second view: who uses WonderDrive and which managed systems it depends on");
+frame(55, 145, 2120, 500, "1", "System landscape", "The five-second view: who uses CuriosityPedia and which managed systems it depends on");
 
 // Person sketch.
 ellipse(130, 280, 62, 62, { backgroundColor: C.coral, strokeColor: C.coralStroke, strokeWidth: 3 });
@@ -192,7 +192,7 @@ line(161, 440, [[0, 0], [-46, 72]], { strokeColor: C.coralStroke, strokeWidth: 3
 line(161, 440, [[0, 0], [46, 72]], { strokeColor: C.coralStroke, strokeWidth: 3, roughness: 2.8 });
 text(90, 535, "curious person", 19, { strokeColor: C.coralStroke });
 
-box(380, 245, 650, 300, "WonderDrive on ChatGPT Sites", "PUBLIC WEB EXPERIENCE\nchoose a performer, model, question, and next path\n\nTRUSTED SERVER ROUTES\nresolve identity · enforce ownership and limits\nassemble research context · validate · persist · stream\n\nSites owns the application boundary and server-only secrets.", {
+box(380, 245, 650, 300, "CuriosityPedia on ChatGPT Sites", "PUBLIC WEB EXPERIENCE\nchoose a performer, model, question, and next path\n\nTRUSTED SERVER ROUTES\nresolve identity · enforce ownership and limits\nassemble research context · validate · persist · stream\n\nSites owns the application boundary and server-only secrets.", {
   fill: C.blue,
   stroke: C.blueStroke,
   strokeWidth: 4,
@@ -272,13 +272,13 @@ sticky(95, 910, 185, 130, "Browser sends", "IDs and actions—\nnot a model-read
 sticky(1915, 1090, 205, 130, "Failure rule", "Timeout, disconnect,\ninvalid citations, or\nversion race = no turn.", { fill: C.coral, stroke: C.coralStroke, angle: 0.012 });
 
 // FRAME 3 — technical containers.
-frame(55, 1495, 2120, 720, "3", "Inside WonderDrive", "A container/component view: which code boundary owns each responsibility");
+frame(55, 1495, 2120, 720, "3", "Inside CuriosityPedia", "A container/component view: which code boundary owns each responsibility");
 
 text(95, 1620, "browser", 14, { strokeColor: C.coralStroke });
 box(95, 1650, 300, 180, "React experience", "stage · map · library\nclient API · SSE reader\nview state only", {
   fill: C.coral,
   stroke: C.coralStroke,
-  footer: "app/wonderdrive-experience.tsx",
+  footer: "app/curiositypedia-experience.tsx",
   titleSize: 19,
   bodySize: 13,
 });
@@ -369,7 +369,7 @@ box(525, 2415, 340, 170, "GitHub Actions", "architecture check · lint\ntypechec
   bodySize: 13,
   footer: "verification only—no paid provider call",
 });
-box(945, 2380, 470, 240, "ChatGPT Sites release", "public WonderDrive URL\nVinext web app + server routes\nSign in with ChatGPT identity seam\nreviewed deployment + rollback path", {
+box(945, 2380, 470, 240, "ChatGPT Sites release", "public CuriosityPedia URL\nVinext web app + server routes\nSign in with ChatGPT identity seam\nreviewed deployment + rollback path", {
   fill: C.blue,
   stroke: C.blueStroke,
   strokeWidth: 4,
@@ -428,7 +428,7 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-const stem = "design/wonderdrive-infrastructure-architecture";
+const stem = "design/curiositypedia-infrastructure-architecture";
 fs.writeFileSync(`${stem}.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const esc = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

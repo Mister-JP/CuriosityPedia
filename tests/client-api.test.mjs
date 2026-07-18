@@ -68,3 +68,22 @@ test("client API preserves quota error codes for targeted recovery", async (cont
     (error) => error?.code === "LIVE_RESEARCH_LIMIT" && error?.retryable === true,
   );
 });
+
+test("live admission errors preserve the identity-scoped takeover target", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => Response.json({
+    error: {
+      code: "ALREADY_IN_PROGRESS",
+      message: "Another foreground request is active.",
+      retryable: true,
+      diagnosticId: "request-active",
+    },
+  }, { status: 409 });
+
+  await assert.rejects(
+    () => streamLiveResearch({ kind: "create", idempotencyKey: "request-key" }, () => {}),
+    (error) => error?.code === "ALREADY_IN_PROGRESS"
+      && error?.diagnosticId === "request-active",
+  );
+});

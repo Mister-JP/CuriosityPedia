@@ -1,8 +1,8 @@
-# WonderDrive
+# CuriosityPedia
 
-WonderDrive is a Vinext application that creates persistent, source-backed research journeys. Each completed turn stores an answer, its evidence, provider usage, and exactly two possible next questions.
+CuriosityPedia is a Vinext application that creates persistent, source-backed research journeys. Each completed turn stores an answer, its evidence, provider usage, and exactly two possible next questions.
 
-Production: [wonderdrive.jigs.chatgpt.site](https://wonderdrive.jigs.chatgpt.site)
+Production: [CuriosityPedia](https://curiositypedia.jigs.chatgpt.site)
 
 ## Runtime stack
 
@@ -39,7 +39,8 @@ Server-side environment variables:
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Live mode only | Authenticates OpenAI Responses API calls. |
-| `WONDERDRIVE_DAILY_BUDGET_USD` | No | Sets the rolling 24-hour project spend limit; default is `25`. |
+| `CURIOSITYPEDIA_OPENAI_ENABLED` | No | Emergency switch for every OpenAI-backed operation. Set to `false` to disable provider calls; enabled by default. |
+| `CURIOSITYPEDIA_DAILY_BUDGET_USD` | No | Sets the rolling 24-hour project spend limit; default is `25`. |
 
 The other provider keys in `.env.example` are inactive placeholders. No corresponding adapters are enabled.
 

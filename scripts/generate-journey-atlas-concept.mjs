@@ -117,7 +117,7 @@ function miniTurn(x, y, number, title, state, selected = false) {
   text(x + 58, y + 43, state, 9, { strokeColor: C.muted });
 }
 
-text(60, 35, "WONDERDRIVE · JOURNEY ATLAS", 40);
+text(60, 35, "CURIOSITYPEDIA · JOURNEY ATLAS", 40);
 text(62, 90, "Replace the Stage / Journey map split with one workspace where path, answer, evidence, and next choices stay visible together.", 17, { strokeColor: C.muted });
 chip(1900, 45, "RECOMMENDED DIRECTION", C.acid, 200);
 
@@ -130,10 +130,10 @@ ellipse(80, 200, 10, 10, { backgroundColor: "#ff7b67", strokeWidth: 1 });
 ellipse(99, 200, 10, 10, { backgroundColor: "#ffd166", strokeWidth: 1 });
 ellipse(118, 200, 10, 10, { backgroundColor: "#81d88d", strokeWidth: 1 });
 rect(690, 193, 600, 25, { backgroundColor: "#ffffff", strokeColor: "#b7bec6", strokeWidth: 1 });
-text(882, 199, "wonderdrive.app/journey/atlas", 10, { strokeColor: C.muted });
+text(882, 199, "curiositypedia.app/journey/atlas", 10, { strokeColor: C.muted });
 
 rect(60, 232, 1900, 70, { backgroundColor: C.light, strokeWidth: 1 });
-text(88, 255, "WONDERDRIVE", 16);
+text(88, 255, "CURIOSITYPEDIA", 16);
 text(1010, 258, "NEW DRIVE", 10, { strokeColor: C.muted });
 text(1135, 258, "LIBRARY", 10, { strokeColor: C.muted });
 text(1235, 258, "COMPARE", 10, { strokeColor: C.muted });
@@ -249,7 +249,7 @@ callout(4, 2020, 970, "Next choices never disappear", 1730, 720, C.green);
 text(60, 1320, "MOBILE · SAME INFORMATION, STACKED WITH JUMP LINKS", 14, { strokeColor: "#d64b38" });
 rect(60, 1355, 540, 1040, { backgroundColor: C.light, strokeWidth: 3, roughness: 1.4 });
 rect(60, 1355, 540, 58, { backgroundColor: "#eeeae2", strokeWidth: 1 });
-text(85, 1375, "WONDERDRIVE", 13);
+text(85, 1375, "CURIOSITYPEDIA", 13);
 text(520, 1376, "•••", 12);
 text(85, 1440, "How does a city remember?", 21);
 text(85, 1474, "Turn 3 of 5 · 4 open paths", 10, { strokeColor: C.muted });
@@ -328,7 +328,7 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-const stem = "design/wonderdrive-journey-atlas-concept";
+const stem = "design/curiositypedia-journey-atlas-concept";
 fs.writeFileSync(`${stem}.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const escapeXml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

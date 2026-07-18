@@ -290,6 +290,8 @@ export const researchRequests = sqliteTable(
     webSearchCalls: integer("web_search_calls").notNull().default(0),
     pageFetches: integer("page_fetches").notNull().default(0),
     estimatedCostMicrousd: integer("estimated_cost_microusd").notNull().default(0),
+    leaseToken: text("lease_token"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
     startedAt: integer("started_at", { mode: "timestamp_ms" }),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
     createdAt,
@@ -300,6 +302,14 @@ export const researchRequests = sqliteTable(
       table.idempotencyKey,
     ),
     index("research_requests_identity_created_idx").on(table.identityId, table.createdAt),
+    index("research_requests_identity_status_lease_idx").on(
+      table.identityId,
+      table.status,
+      table.leaseExpiresAt,
+    ),
+    uniqueIndex("research_requests_identity_active_unique")
+      .on(table.identityId)
+      .where(sql`${table.status} IN ('reserved', 'researching')`),
   ],
 );
 
@@ -419,6 +429,56 @@ export const providerUsageEvents = sqliteTable(
     index("provider_usage_identity_created_idx").on(table.identityId, table.createdAt),
     index("provider_usage_operation_created_idx").on(table.operation, table.createdAt),
     index("provider_usage_request_idx").on(table.researchRequestId),
+  ],
+);
+
+export const providerCostReservations = sqliteTable(
+  "provider_cost_reservations",
+  {
+    id: text("id").primaryKey(),
+    callKey: text("call_key").notNull(),
+    identityId: text("identity_id")
+      .notNull()
+      .references(() => identities.id),
+    researchRequestId: text("research_request_id").references(() => researchRequests.id),
+    journeyId: text("journey_id").references(() => journeys.id),
+    turnId: text("turn_id").references(() => turns.id),
+    provider: text("provider").notNull().default("openai"),
+    modelId: text("model_id").notNull(),
+    operation: text("operation", {
+      enum: [
+        "live_research",
+        "image_note_repair",
+        "citation_repair",
+        "citation_recovery",
+        "starter_generation",
+        "question_redraw",
+      ],
+    }).notNull(),
+    status: text("status", {
+      enum: ["reserved", "settled", "uncertain", "released"],
+    })
+      .notNull()
+      .default("reserved"),
+    reservedMicrousd: integer("reserved_microusd").notNull(),
+    settledMicrousd: integer("settled_microusd"),
+    priceEffectiveAt: text("price_effective_at").notNull(),
+    envelopeJson: text("envelope_json").notNull(),
+    providerRequestId: text("provider_request_id"),
+    windowStartedAt: integer("window_started_at", { mode: "timestamp_ms" }).notNull(),
+    settledAt: integer("settled_at", { mode: "timestamp_ms" }),
+    releasedAt: integer("released_at", { mode: "timestamp_ms" }),
+    createdAt,
+  },
+  (table) => [
+    uniqueIndex("provider_cost_reservations_call_key_unique").on(table.callKey),
+    index("provider_cost_reservations_window_idx").on(table.windowStartedAt, table.status),
+    index("provider_cost_reservations_identity_window_idx").on(
+      table.identityId,
+      table.windowStartedAt,
+      table.status,
+    ),
+    index("provider_cost_reservations_request_idx").on(table.researchRequestId),
   ],
 );
 

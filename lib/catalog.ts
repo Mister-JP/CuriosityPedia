@@ -109,7 +109,7 @@ export const MODELS: ModelConfig[] = [
     searchUsdPerCall: 0.01,
     priceEffectiveAt: "2026-07-14",
     recommended: false,
-    evaluationVersion: "wonderdrive-eval@1",
+    evaluationVersion: "curiositypedia-eval@1",
   },
   {
     id: "gpt-5.6-terra",
@@ -131,7 +131,7 @@ export const MODELS: ModelConfig[] = [
     searchUsdPerCall: 0.01,
     priceEffectiveAt: "2026-07-14",
     recommended: false,
-    evaluationVersion: "wonderdrive-eval@1",
+    evaluationVersion: "curiositypedia-eval@1",
   },
   {
     id: "gpt-5.6-luna",
@@ -153,7 +153,7 @@ export const MODELS: ModelConfig[] = [
     searchUsdPerCall: 0.01,
     priceEffectiveAt: "2026-07-13",
     recommended: true,
-    evaluationVersion: "wonderdrive-eval@1",
+    evaluationVersion: "curiositypedia-eval@1",
   },
   ...[
     ["gpt-5.5", "GPT-5.5", 5, 0.5, 30, "deliberate", "metered", "Previous flagship; strong but less economical than Luna."],
@@ -180,7 +180,7 @@ export const MODELS: ModelConfig[] = [
     searchUsdPerCall: 0.01,
     priceEffectiveAt: "2026-07-14",
     recommended: false,
-    evaluationVersion: "wonderdrive-eval@1",
+    evaluationVersion: "curiositypedia-eval@1",
   })),
 ];
 

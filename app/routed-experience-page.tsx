@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import { WonderDriveExperience } from "./wonderdrive-experience";
+import { CuriosityPediaExperience } from "./curiositypedia-experience";
 
 export default function RoutedExperiencePage() {
   return (
     <Suspense fallback={<RoutedExperienceFallback />}>
-      <WonderDriveExperience />
+      <CuriosityPediaExperience />
     </Suspense>
   );
 }
@@ -14,13 +14,13 @@ function RoutedExperienceFallback() {
     <main className="app-shell text-medium">
       <header className="app-header">
         <div className="wordmark">
-          <span className="wordmark-mark" aria-hidden="true">W</span>
-          <span>WonderDrive<small>curiosity, performed</small></span>
+          <span className="wordmark-mark" aria-hidden="true">C</span>
+          <span>CuriosityPedia</span>
         </div>
       </header>
       <section className="loading-stage" aria-live="polite">
         <span className="loading-orbit" />
-        <p>Opening your WonderDrive library…</p>
+        <p>Opening your CuriosityPedia library…</p>
         <small>Resolving a durable guest identity</small>
       </section>
       <footer className="app-footer">

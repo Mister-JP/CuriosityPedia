@@ -14,7 +14,7 @@ const SKELETON_LIGHT = "#e9eae7";
 
 const elements = [];
 let serial = 0;
-const fileId = "wonderdrive-archival-map";
+const fileId = "curiositypedia-archival-map";
 
 function base(type, x, y, width, height, o = {}) {
   serial += 1;
@@ -119,8 +119,7 @@ function skeletonLine(x, y, width, height = 12, light = false) {
 }
 
 function header(x, y, loading) {
-  text(x + 42, y + 24, "WONDER", 17, { strokeColor: INK });
-  text(x + 116, y + 24, "DRIVE", 17, { strokeColor: CORAL });
+  text(x + 42, y + 24, "CuriosityPedia", 17, { strokeColor: INK });
   line(x + 209, y + 16, [[0, 0], [0, 34]], { strokeColor: DIVIDER });
   text(x + 234, y + 17, "TURN 06", 10, { strokeColor: MUTED });
   ellipse(x + 311, y + 14, 34, 34, { backgroundColor: "#ffd1c9", strokeColor: CORAL });
@@ -310,7 +309,7 @@ function screen(x, y, loading) {
   directions(x, y, loading);
 }
 
-text(60, 34, "WonderDrive · editorial journey screen", 26);
+text(60, 34, "CuriosityPedia · editorial journey screen", 26);
 text(60, 69, "One 16:9 composition. Ready content and loading placeholders share identical geometry.", 13, {
   strokeColor: MUTED,
 });
@@ -355,7 +354,7 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-const stem = "design/wonderdrive-editorial-journey-screen";
+const stem = "design/curiositypedia-editorial-journey-screen";
 fs.writeFileSync(`${stem}.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const escapeXml = (value) =>

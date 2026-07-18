@@ -1,5 +1,5 @@
 import { query } from "../../../../lib/api";
-import { getResearchStatus } from "../../../../lib/product-repository";
+import { getResearchStatus } from "../../../../lib/research-status-repository";
 
 type Context = { params: Promise<{ runId: string }> };
 

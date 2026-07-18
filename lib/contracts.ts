@@ -43,7 +43,7 @@ export type Performer = {
 export type ModelConfig = {
   id: ModelId;
   snapshot: string;
-  provider: "OpenAI" | "WonderDrive";
+  provider: "OpenAI" | "CuriosityPedia";
   name: string;
   disclosure: string;
   mode: "live" | "fixture";
@@ -110,6 +110,8 @@ export type UsageSummary = {
   };
   spend: {
     usedUsd: number;
+    heldUsd: number;
+    accountedUsd: number;
     limitUsd: number;
     remainingUsd: number;
     nextReleaseAt: number | null;
@@ -309,6 +311,7 @@ export type LiveResearchRequest =
       outputLocale: SupportedLocale;
       idempotencyKey: string;
       takeoverExisting?: boolean;
+      takeoverRequestId?: string;
     }
   | {
       kind: "advance";
@@ -320,6 +323,7 @@ export type LiveResearchRequest =
       expectedVersion: number;
       idempotencyKey: string;
       takeoverExisting?: boolean;
+      takeoverRequestId?: string;
     };
 
 export type LiveResearchStreamEvent =

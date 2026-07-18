@@ -1,5 +1,5 @@
 import { mutation, query, readJson } from "../../../../../lib/api";
-import { createSnapshot, listSnapshots } from "../../../../../lib/product-repository";
+import { createSnapshot, listSnapshots } from "../../../../../lib/snapshots-repository";
 
 type Context = { params: Promise<{ journeyId: string }> };
 

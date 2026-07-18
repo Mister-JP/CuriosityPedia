@@ -1,4 +1,4 @@
-export type WonderDriveRoute =
+export type CuriosityPediaRoute =
   | { name: "start" }
   | { name: "library" }
   | { name: "bookmarks" }
@@ -11,7 +11,7 @@ export type WonderDriveRoute =
       surface: "stage" | "map";
     };
 
-const STATIC_ROUTES = new Map<string, WonderDriveRoute>([
+const STATIC_ROUTES = new Map<string, CuriosityPediaRoute>([
   ["/", { name: "start" }],
   ["/library", { name: "library" }],
   ["/bookmarks", { name: "bookmarks" }],
@@ -19,10 +19,10 @@ const STATIC_ROUTES = new Map<string, WonderDriveRoute>([
   ["/settings", { name: "settings" }],
 ]);
 
-export function parseWonderDriveRoute(
+export function parseCuriosityPediaRoute(
   pathname: string,
   search: string | URLSearchParams = "",
-): WonderDriveRoute | null {
+): CuriosityPediaRoute | null {
   const normalizedPath = normalizePath(pathname);
   const staticRoute = STATIC_ROUTES.get(normalizedPath);
   if (staticRoute) return staticRoute;

@@ -10,12 +10,12 @@
 <ellipse cx="100.5" cy="1220.5" rx="4.5" ry="4.5" fill="#ffd166" stroke="#15261f" stroke-width="1" opacity="1"/>
 <ellipse cx="118.5" cy="1220.5" rx="4.5" ry="4.5" fill="#81d88d" stroke="#15261f" stroke-width="1" opacity="1"/>
 <rect x="620" y="1210" width="460" height="23" rx="6" fill="#ffffff" stroke="#bfc8c2" stroke-width="1" opacity="1" />
-<text x="771" y="1225" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="771" dy="0">wonderdrive.app/journey</tspan></text>
+<text x="771" y="1225" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="771" dy="0">curiositypedia.app/journey</tspan></text>
 <rect x="60" y="1246" width="1580" height="70" rx="6" fill="#fffdf8" stroke="#15261f" stroke-width="1" opacity="1" />
 <ellipse cx="102" cy="1281" rx="18" ry="18" fill="#15261f" stroke="#15261f" stroke-width="1" opacity="1"/>
-<text x="97" y="1285" fill="#fffdf8" font-size="14" font-weight="500" opacity="1"><tspan x="97" dy="0">W</tspan></text>
-<text x="133" y="1282" fill="#15261f" font-size="16" font-weight="500" opacity="1"><tspan x="133" dy="0">WonderDrive</tspan></text>
-<text x="133" y="1298" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="133" dy="0">CURIOSITY, PERFORMED</tspan></text>
+<text x="97" y="1285" fill="#fffdf8" font-size="14" font-weight="500" opacity="1"><tspan x="97" dy="0">C</tspan></text>
+<text x="133" y="1282" fill="#15261f" font-size="16" font-weight="500" opacity="1"><tspan x="133" dy="0">CuriosityPedia</tspan></text>
+<text x="133" y="1298" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="133" dy="0">SOURCE-BACKED LEARNING</tspan></text>
 <text x="1010" y="1285" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="1010" dy="0">NEW DRIVE</tspan></text>
 <text x="1115" y="1285" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="1115" dy="0">LIBRARY</tspan></text>
 <text x="1210" y="1285" fill="#66736d" font-size="9" font-weight="500" opacity="1"><tspan x="1210" dy="0">COMPARE</tspan></text>

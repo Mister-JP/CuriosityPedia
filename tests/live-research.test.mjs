@@ -2,7 +2,101 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { env } from "cloudflare:workers";
 import { PERFORMERS, REAL_WORLD_DISCOVERY_STARTERS, STARTERS } from "../lib/catalog.ts";
-import { liveResearchTestHooks, runLiveResearch } from "../lib/live-research.ts";
+import { runLiveResearch } from "../lib/live-research.ts";
+import {
+  TURN_SCHEMA,
+  buildInstructions,
+  buildResearchInput,
+  densityVerbosity,
+  turnSchemaForDensity,
+} from "../lib/research/prompt-policy.ts";
+import * as providerResponsePolicy from "../lib/research/provider-response.ts";
+import { readServerSentEvents, runProviderStream } from "../lib/research/provider-stream.ts";
+import * as turnValidationPolicy from "../lib/research/turn-validation.ts";
+
+const liveResearchTestHooks = {
+  ...providerResponsePolicy,
+  ...turnValidationPolicy,
+};
+
+function preparedResearch(overrides = {}) {
+  return {
+    requestId: "request-stream-characterization",
+    identityId: "identity-stream-characterization",
+    viewerMode: "guest",
+    kind: "create",
+    question: "How do split streaming frames preserve a structured response?",
+    seed: "How do split streaming frames preserve a structured response?",
+    depth: 0,
+    performerId: "mechanist",
+    modelId: "gpt-5.4-nano",
+    researchPreset: "standard",
+    answerDensity: "balanced",
+    imagePreference: "avoid",
+    outputLocale: "en",
+    topicTrail: [],
+    idempotencyKey: "idempotency-stream-characterization",
+    payloadHash: "payload-stream-characterization",
+    ...overrides,
+  };
+}
+
+test("lease ownership is checked before the first provider attempt", async () => {
+  let providerCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    providerCalls += 1;
+    return Response.json({});
+  };
+  try {
+    await assert.rejects(
+      () => runLiveResearch(
+        preparedResearch(),
+        () => {},
+        undefined,
+        async () => { throw new Error("lease lost"); },
+      ),
+      /lease lost/,
+    );
+    assert.equal(providerCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function usageWriteCounter() {
+  let writes = 0;
+  env.DB = {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async run() {
+          if (sql.includes("INSERT INTO provider_usage_events")) writes += 1;
+          return { success: true };
+        },
+      };
+    },
+  };
+  return () => writes;
+}
+
+function streamUsageContext() {
+  return {
+    identityId: "identity-stream-characterization",
+    viewerMode: "guest",
+    researchRequestId: "request-stream-characterization",
+    modelId: "gpt-5.4-nano",
+    operation: "live_research",
+    purpose: "opening_turn",
+    metadata: {
+      preset: "standard",
+      answerDensity: "balanced",
+      imagePreference: "avoid",
+      depth: 0,
+    },
+    callKey: `stream-test:${crypto.randomUUID()}`,
+  };
+}
 
 const providerResponse = {
   output: [
@@ -32,7 +126,7 @@ const validTurn = {
   topicLabel: "evidence systems",
   answerBlocks: [
     {
-      text: "The first part of this researched performance is deliberately long enough to satisfy WonderDrive’s answer contract and make one supported claim.",
+      text: "The first part of this researched performance is deliberately long enough to satisfy CuriosityPedia’s answer contract and make one supported claim.",
       citationUrls: ["https://example.org/evidence"],
     },
     {
@@ -70,6 +164,40 @@ test("normalizes and deduplicates provider-returned web sources", () => {
   assert.equal(sources.length, 2);
   assert.equal(sources[0].url, "https://example.org/evidence");
   assert.equal(sources[1].publisher, "research.example.net");
+});
+
+test("ignores malformed provider envelopes and counts only recognized research actions", () => {
+  assert.deepEqual(liveResearchTestHooks.extractSources({ output: "not-an-array" }), []);
+  assert.deepEqual(liveResearchTestHooks.extractImages({ output: [{ type: "web_search_call", results: [{}] }] }), []);
+  const response = {
+    output: [
+      null,
+      { type: "web_search_call", action: { type: "search", sources: [{ url: "not a URL" }] } },
+      { type: "web_search_call", action: { type: "open_page" } },
+      { type: "tool_call", action: { type: "find_in_page" } },
+      { type: "tool_call", action: { type: "click" } },
+    ],
+  };
+
+  assert.deepEqual(liveResearchTestHooks.extractSources(response), []);
+  assert.equal(liveResearchTestHooks.countWebSearchCalls(response), 2);
+  assert.equal(liveResearchTestHooks.countPageFetches(response), 2);
+});
+
+test("rejects malformed JSON and array-shaped generated turns at the parsing boundary", () => {
+  const failure = (detail) => Object.assign(new Error(detail), { code: "SCHEMA_INVALID" });
+  assert.equal(
+    liveResearchTestHooks.parseModelTurn(JSON.stringify(validTurn), failure).topicLabel,
+    validTurn.topicLabel,
+  );
+  assert.throws(
+    () => liveResearchTestHooks.parseModelTurn("[]", failure),
+    (error) => error?.code === "SCHEMA_INVALID" && /turn object/i.test(error.message),
+  );
+  assert.throws(
+    () => liveResearchTestHooks.parseModelTurn("not-json", failure),
+    (error) => error?.code === "SCHEMA_INVALID" && /could not be validated/i.test(error.message),
+  );
 });
 
 test("extracts image search results into a graceful media gallery", () => {
@@ -130,6 +258,76 @@ test("extracts image search results into a graceful media gallery", () => {
   assert.ok(mapped.media[0].commentary.split(/\s+/).length >= 30);
   assert.doesNotMatch(mapped.media[0].commentary, /answer block|block 1/i);
   assert.ok(mapped.sources.some((source) => source.relation === "image"));
+});
+
+test("preserves consulted source relations and legacy visual-note commentary", () => {
+  const images = liveResearchTestHooks.extractImages({
+    output: [{
+      type: "web_search_call",
+      action: {
+        results: [{
+          type: "image_result",
+          image_url: "https://images.example.org/legacy.jpg",
+          source_website_url: "https://museum.example.org/exhibits/legacy-machine",
+          caption: "A museum machine with its drive mechanism exposed.",
+        }],
+      },
+    }],
+  });
+  const turn = structuredClone(validTurn);
+  turn.answerBlocks[1].citationUrls = ["https://example.org/evidence"];
+  turn.visualNotes = [{
+    sourcePageUrl: "https://museum.example.org/exhibits/legacy-machine",
+    title: "Exposed drive mechanism",
+    role: "mechanism",
+    commentary: "",
+    whyIncluded: "The museum view exposes the machine's connected drive parts instead of hiding them behind an outer case.",
+    whatToNotice: ["A narrow belt links the upper wheel to the lower shaft.", "Both wheels share the same visible direction of travel."],
+    learning: "The linked parts turn one local motion into coordinated movement across the whole mechanism.",
+    evidenceRelation: "illustrates",
+  }];
+
+  const mapped = liveResearchTestHooks.validateAndMapTurn(
+    turn,
+    liveResearchTestHooks.extractSources(providerResponse),
+    "prefer",
+    images,
+  );
+
+  assert.equal(mapped.media.length, 1);
+  assert.match(mapped.media[0].commentary, /museum view exposes/);
+  assert.deepEqual(mapped.sources.map((source) => source.relation), ["cited", "consulted", "image"]);
+});
+
+test("rejects unsafe provider image provenance without weakening optional text turns", () => {
+  const images = liveResearchTestHooks.extractImages({
+    output: [{
+      type: "web_search_call",
+      results: [{
+        type: "image_result",
+        image_url: "https://127.0.0.1/private.jpg",
+        source_website_url: "https://example.org/private-image",
+        caption: "A private-network image result.",
+      }],
+    }],
+  });
+  const turn = structuredClone(validTurn);
+  turn.visualNotes = [{
+    sourcePageUrl: "https://example.org/private-image",
+    title: "Private image",
+    role: "context",
+    commentary: "This deliberately long visual note describes enough concrete visible detail to pass commentary specificity, while the private-network image URL itself must still prevent the media item from entering the mapped turn or its source provenance collection.",
+    evidenceRelation: "shows",
+  }];
+
+  const mapped = liveResearchTestHooks.validateAndMapTurn(
+    turn,
+    liveResearchTestHooks.extractSources(providerResponse),
+    "when-useful",
+    images,
+  );
+  assert.deepEqual(mapped.media, []);
+  assert.ok(mapped.sources.every((source) => source.relation !== "image"));
 });
 
 test("requires validated visual notes when factual images are mandatory", () => {
@@ -387,7 +585,7 @@ test("accepts generated prose up to 20 percent beyond its target length", () => 
 });
 
 test("sends only the ordered topic trail as prior-content context", () => {
-  const input = liveResearchTestHooks.buildResearchInput({
+  const input = buildResearchInput({
     question: "How does Bluetooth hopping avoid interference?",
     researchPreset: "standard",
     answerDensity: "balanced",
@@ -416,24 +614,87 @@ test("makes each answer-density preference explicit and schema-enforced", () => 
     topicTrail: [],
   };
 
-  const brief = liveResearchTestHooks.buildResearchInput({ ...base, answerDensity: "brief" });
-  const balanced = liveResearchTestHooks.buildResearchInput({ ...base, answerDensity: "balanced" });
-  const rich = liveResearchTestHooks.buildResearchInput({ ...base, answerDensity: "rich" });
+  const brief = buildResearchInput({ ...base, answerDensity: "brief" });
+  const balanced = buildResearchInput({ ...base, answerDensity: "balanced" });
+  const rich = buildResearchInput({ ...base, answerDensity: "rich" });
 
   assert.match(brief, /exactly 2 compact answer blocks and about 2–4 sentences total/);
   assert.match(balanced, /2–3 answer blocks and about 5–7 sentences total/);
   assert.match(rich, /4–5 substantial answer blocks and about 8–12 sentences total/);
   assert.deepEqual(
     ["brief", "balanced", "rich"].map((density) => {
-      const schema = liveResearchTestHooks.turnSchemaForDensity(density);
+      const schema = turnSchemaForDensity(density);
       return [schema.properties.answerBlocks.minItems, schema.properties.answerBlocks.maxItems];
     }),
     [[2, 2], [2, 3], [4, 5]],
   );
+  assert.deepEqual(
+    ["brief", "balanced", "rich"].map(densityVerbosity),
+    ["low", "medium", "high"],
+  );
+});
+
+test("publishes the exact structured-turn schema policy", () => {
+  assert.deepEqual(TURN_SCHEMA.required, [
+    "topicLabel",
+    "answerBlocks",
+    "visualNotes",
+    "transition",
+    "researchSummary",
+    "researchHandoff",
+    "preferredPosition",
+    "options",
+  ]);
+  assert.deepEqual(TURN_SCHEMA.properties.answerBlocks, {
+    type: "array",
+    minItems: 2,
+    maxItems: 5,
+    items: {
+      type: "object",
+      additionalProperties: false,
+      required: ["text", "citationUrls"],
+      properties: {
+        text: { type: "string", minLength: 20, maxLength: 1_080 },
+        citationUrls: {
+          type: "array",
+          minItems: 1,
+          maxItems: 4,
+          items: { type: "string", minLength: 6, maxLength: 2_458 },
+        },
+      },
+    },
+  });
+  assert.deepEqual(TURN_SCHEMA.properties.visualNotes.items.properties.role.enum, [
+    "phenomenon",
+    "mechanism",
+    "scale",
+    "anchor",
+    "comparison",
+  ]);
+  assert.deepEqual(TURN_SCHEMA.properties.researchHandoff.required, [
+    "discoveries",
+    "uncertainties",
+    "unresolvedThreads",
+    "sourceLeads",
+  ]);
+  assert.deepEqual(TURN_SCHEMA.properties.options, {
+    type: "array",
+    minItems: 2,
+    maxItems: 2,
+    items: {
+      type: "object",
+      additionalProperties: false,
+      required: ["question", "angle"],
+      properties: {
+        question: { type: "string", minLength: 3, maxLength: 132 },
+        angle: { type: "string", minLength: 1, maxLength: 39 },
+      },
+    },
+  });
 });
 
 test("implements the v4 phenomenon-first three-pass editorial system", () => {
-  const instructions = liveResearchTestHooks.buildInstructions({
+  const instructions = buildInstructions({
     name: "Mechanist",
     cue: "Makes hidden mechanisms legible.",
     values: ["mechanism"],
@@ -477,7 +738,7 @@ test("Atlas keeps generated paths on documented real-world subjects", () => {
   assert.match(atlas.questionPosture, /Every generated question must concern something real and researchable/);
   assert.match(atlas.questionPosture, /Never invent fictional premises, imaginary worlds/);
   assert.match(atlas.toolPosture, /Search first/);
-  const instructions = liveResearchTestHooks.buildInstructions(atlas);
+  const instructions = buildInstructions(atlas);
   assert.match(instructions, /do not turn that guidance into hypothetical or counterfactual paths/);
   assert.match(instructions, /documented real-world anchor is mandatory/);
   assert.match(instructions, /topicLabel as a concise subject label, not as a repetition/);
@@ -496,15 +757,15 @@ test("turn input makes image preference operational", () => {
     topicTrail: [],
   };
   assert.match(
-    liveResearchTestHooks.buildResearchInput({ ...base, imagePreference: "when-useful" }),
+    buildResearchInput({ ...base, imagePreference: "when-useful" }),
     /return an empty visual set rather than weak, decorative, or merely topical images/,
   );
   assert.match(
-    liveResearchTestHooks.buildResearchInput({ ...base, imagePreference: "prefer" }),
+    buildResearchInput({ ...base, imagePreference: "prefer" }),
     /Actively search for one strong factual hero image/,
   );
   assert.match(
-    liveResearchTestHooks.buildResearchInput({ ...base, imagePreference: "avoid" }),
+    buildResearchInput({ ...base, imagePreference: "avoid" }),
     /Do not search for or return images/,
   );
 });
@@ -558,6 +819,7 @@ test("prunes unsupported blocks only when at least two cited blocks survive", ()
 test("reports a provider token-limit terminal event instead of a missing response", async () => {
   const originalFetch = globalThis.fetch;
   env.OPENAI_API_KEY = "test-key";
+  usageWriteCounter();
   const incomplete = {
     id: "resp_incomplete",
     status: "incomplete",
@@ -600,6 +862,159 @@ test("reports a provider token-limit terminal event instead of a missing respons
   } finally {
     globalThis.fetch = originalFetch;
     delete env.OPENAI_API_KEY;
+    delete env.DB;
+  }
+});
+
+test("parses split SSE frames, ignores malformed frames, and retains an unterminated final frame", async () => {
+  const encoder = new TextEncoder();
+  const chunks = [
+    "data: {\"type\":\"response.output_",
+    "text.delta\",\"delta\":\"part\"}\n\ndata: not-json\n\n",
+    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_final\"}}",
+  ];
+  const stream = new ReadableStream({
+    start(controller) {
+      chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+      controller.close();
+    },
+  });
+  const observations = [];
+  const events = [];
+  for await (const event of readServerSentEvents(
+    stream,
+    (kind, type = "") => observations.push([kind, type]),
+  )) {
+    events.push(event);
+  }
+
+  assert.deepEqual(events.map((event) => event.type), [
+    "response.output_text.delta",
+    "response.completed",
+  ]);
+  assert.deepEqual(observations, [
+    ["event", "response.output_text.delta"],
+    ["malformed", ""],
+    ["event", "response.completed"],
+  ]);
+});
+
+test("records exactly one usage outcome for HTTP, missing-body, and missing-terminal stream failures", async () => {
+  const originalFetch = globalThis.fetch;
+  env.OPENAI_API_KEY = "test-key";
+  const cases = [
+    {
+      response: () => new Response("rejected", { status: 429 }),
+      code: "PROVIDER_ERROR",
+    },
+    {
+      response: () => new Response(null, { status: 200 }),
+      code: "PROVIDER_ERROR",
+    },
+    {
+      response: () => new Response("data: [DONE]\n\n", { status: 200 }),
+      code: "PROVIDER_ERROR",
+    },
+  ];
+  try {
+    for (const [index, item] of cases.entries()) {
+      const writes = usageWriteCounter();
+      globalThis.fetch = async () => item.response();
+      await assert.rejects(
+        () => runLiveResearch(preparedResearch({ requestId: `request-terminal-${index}` }), () => {}),
+        (error) => error?.code === item.code,
+      );
+      assert.equal(writes(), 1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete env.OPENAI_API_KEY;
+    delete env.DB;
+  }
+});
+
+test("maps a pre-dispatch external abort to the provider-timeout error without recording provider usage", async () => {
+  const originalFetch = globalThis.fetch;
+  env.OPENAI_API_KEY = "test-key";
+  const writes = usageWriteCounter();
+  const external = new AbortController();
+  globalThis.fetch = async (_url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+  });
+
+  try {
+    const research = runLiveResearch(preparedResearch(), () => {}, external.signal);
+    external.abort("characterized client disconnect");
+    await assert.rejects(
+      () => research,
+      (error) => error?.code === "PROVIDER_TIMEOUT" && error?.status === 504,
+    );
+    assert.equal(writes(), 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete env.OPENAI_API_KEY;
+    delete env.DB;
+  }
+});
+
+test("maps the provider-stream deadline to the same timeout error and records it once", async () => {
+  const originalFetch = globalThis.fetch;
+  env.OPENAI_API_KEY = "test-key";
+  const writes = usageWriteCounter();
+  globalThis.fetch = async (_url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+  });
+
+  try {
+    await assert.rejects(
+      () => runProviderStream({
+        requestBody: { stream: true, store: false },
+        timeoutMs: 0,
+        startedAt: Date.now(),
+        usageContext: streamUsageContext(),
+      }),
+      (error) => error?.code === "PROVIDER_TIMEOUT" && error?.status === 504,
+    );
+    assert.equal(writes(), 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete env.OPENAI_API_KEY;
+    delete env.DB;
+  }
+});
+
+test("returns the completed provider envelope and records one successful stream outcome", async () => {
+  const originalFetch = globalThis.fetch;
+  env.OPENAI_API_KEY = "test-key";
+  const writes = usageWriteCounter();
+  const completed = {
+    id: "resp_stream_success",
+    output: [],
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+  };
+  const stream = [
+    { type: "response.output_text.delta", delta: "structured output" },
+    { type: "response.completed", response: completed },
+  ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + "data: [DONE]\n\n";
+  globalThis.fetch = async () => new Response(stream, {
+    status: 200,
+    headers: { "x-request-id": "req_stream_success" },
+  });
+
+  try {
+    const result = await runProviderStream({
+      requestBody: { stream: true, store: false },
+      timeoutMs: 1_000,
+      startedAt: Date.now(),
+      usageContext: streamUsageContext(),
+    });
+    assert.equal(result.outputText, "structured output");
+    assert.equal(result.completedResponse.id, "resp_stream_success");
+    assert.equal(writes(), 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete env.OPENAI_API_KEY;
+    delete env.DB;
   }
 });
 
@@ -607,6 +1022,7 @@ test("runs exactly one no-search repair after an initial citation mismatch", asy
   const originalFetch = globalThis.fetch;
   const originalError = console.error;
   env.OPENAI_API_KEY = "test-key";
+  usageWriteCounter();
   const broken = structuredClone(validTurn);
   broken.answerBlocks[0].citationUrls = ["https://redirected.example/unknown"];
   const completed = {
@@ -679,8 +1095,36 @@ test("runs exactly one no-search repair after an initial citation mismatch", asy
       search_content_types: ["image", "text"],
       image_settings: { max_results: 10, caption: true },
     }]);
+    assert.equal(requests[0].model, "gpt-5.6-luna");
+    assert.equal(requests[0].instructions, buildInstructions(
+      PERFORMERS.find((performer) => performer.id === "sage"),
+    ));
+    assert.equal(requests[0].input, buildResearchInput({
+      question: "How does Bluetooth avoid interference?",
+      researchPreset: "standard",
+      answerDensity: "balanced",
+      imagePreference: "when-useful",
+      topicTrail: [],
+    }));
+    assert.deepEqual(requests[0].include, [
+      "web_search_call.action.sources",
+      "web_search_call.results",
+    ]);
+    assert.equal(requests[0].tool_choice, "auto");
     assert.equal(requests[0].max_output_tokens, 8_000);
     assert.deepEqual(requests[0].reasoning, { effort: "medium" });
+    assert.deepEqual(requests[0].text, {
+      format: {
+        type: "json_schema",
+        name: "curiositypedia_turn",
+        strict: true,
+        schema: turnSchemaForDensity("balanced"),
+      },
+      verbosity: "medium",
+    });
+    assert.equal(requests[0].safety_identifier, "wd_identity-123");
+    assert.equal(requests[0].store, false);
+    assert.equal(requests[0].stream, true);
     assert.equal(requests[1].tools, undefined);
     assert.equal(requests[1].max_output_tokens, 2_000);
     assert.deepEqual(requests[1].reasoning, { effort: "medium" });
@@ -694,6 +1138,7 @@ test("runs exactly one no-search repair after an initial citation mismatch", asy
     console.error = originalError;
     globalThis.fetch = originalFetch;
     delete env.OPENAI_API_KEY;
+    delete env.DB;
   }
 });
 
@@ -701,6 +1146,7 @@ test("recovers an unsupported block with a targeted web search", async () => {
   const originalFetch = globalThis.fetch;
   const originalError = console.error;
   env.OPENAI_API_KEY = "test-key";
+  usageWriteCounter();
   const broken = structuredClone(validTurn);
   broken.answerBlocks[0].citationUrls = ["https://unseen.example/claim"];
   const completed = {
@@ -799,6 +1245,7 @@ test("recovers an unsupported block with a targeted web search", async () => {
     console.error = originalError;
     globalThis.fetch = originalFetch;
     delete env.OPENAI_API_KEY;
+    delete env.DB;
   }
 });
 
@@ -806,6 +1253,7 @@ test("commits a shortened answer when recovery fails but two cited blocks surviv
   const originalFetch = globalThis.fetch;
   const originalError = console.error;
   env.OPENAI_API_KEY = "test-key";
+  usageWriteCounter();
   const broken = structuredClone(validTurn);
   broken.answerBlocks.unshift({
     text: "This unsupported opening block is long enough for the answer contract but should be removed when targeted evidence recovery cannot validate it.",
@@ -882,5 +1330,6 @@ test("commits a shortened answer when recovery fails but two cited blocks surviv
     console.error = originalError;
     globalThis.fetch = originalFetch;
     delete env.OPENAI_API_KEY;
+    delete env.DB;
   }
 });

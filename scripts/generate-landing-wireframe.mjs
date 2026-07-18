@@ -52,13 +52,13 @@ function path(type, x, y, points, options = {}) {
 const line = (x, y, pts, o = {}) => path("line", x, y, pts, o);
 const arrow = (x, y, pts, o = {}) => path("arrow", x, y, pts, o);
 
-text(76, 24, "WonderDrive — simple personalized start", 30);
+text(76, 24, "CuriosityPedia — simple personalized start", 30);
 text(78, 64, "Recommendations create the fun. Performer and model remain clear, compact choices.", 16, { strokeColor: "#495057" });
 
 // Product frame and quiet navigation.
 rect(64, 108, 1370, 930, { backgroundColor: "#fffdf8", roughness: 1.8 });
 line(64, 169, [[0, 0], [1370, 0]], { strokeColor: "#868e96", strokeWidth: 1 });
-text(96, 125, "WONDERDRIVE", 20);
+text(96, 125, "CURIOSITYPEDIA", 20);
 text(676, 127, "New journey     My paths", 14, { strokeColor: "#495057" });
 ellipse(1374, 126, 14, 14, { backgroundColor: "#b2f2bb", strokeColor: "#2b8a3e", strokeWidth: 1 });
 
@@ -164,4 +164,4 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-fs.writeFileSync("design/wonderdrive-simple-personalized-landing-v4.excalidraw", `${JSON.stringify(drawing, null, 2)}\n`);
+fs.writeFileSync("design/curiositypedia-simple-personalized-landing-v4.excalidraw", `${JSON.stringify(drawing, null, 2)}\n`);

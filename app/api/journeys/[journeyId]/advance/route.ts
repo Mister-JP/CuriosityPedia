@@ -15,6 +15,8 @@ export async function POST(request: Request, context: Context) {
     return advanceJourney(viewer, journeyId, body, async ({ journey, turn }) =>
       runLiveRedraw({
         identityId: viewer.identityId,
+        viewerMode: viewer.mode,
+        callKey: body.idempotencyKey,
         journeyId,
         turn,
         performerId: journey.performerId,

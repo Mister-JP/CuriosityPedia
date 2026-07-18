@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import sharp from "sharp";
 
-const OUT = "design/wonderdrive-question-and-loading.excalidraw";
-const SVG = "design/wonderdrive-question-and-loading.svg";
-const PNG = "design/wonderdrive-question-and-loading.png";
+const OUT = "design/curiositypedia-question-and-loading.excalidraw";
+const SVG = "design/curiositypedia-question-and-loading.svg";
+const PNG = "design/curiositypedia-question-and-loading.png";
 const elements = [];
 let serial = 0;
 
@@ -51,7 +51,7 @@ const line = (x, y, pts, o = {}) => path("line", x, y, pts, o);
 const arrow = (x, y, pts, o = {}) => path("arrow", x, y, pts, o);
 
 // Board title and story.
-text(80, 45, "WonderDrive — ask → research", 36);
+text(80, 45, "CuriosityPedia — ask → research", 36);
 text(82, 96, "Two product states on one hand-drawn Excalidraw canvas", 17, { strokeColor: "#667085" });
 rect(1980, 49, 340, 54, { backgroundColor: "#dfff58", strokeColor: "#17212b" });
 text(2043, 64, "ONE QUESTION · ONE LIVE RUN", 14);
@@ -76,17 +76,17 @@ ellipse(105, 256, 12, 12, { backgroundColor: "#ff7b67", strokeWidth: 1 });
 ellipse(128, 256, 12, 12, { backgroundColor: "#ffd166", strokeWidth: 1 });
 ellipse(151, 256, 12, 12, { backgroundColor: "#81d88d", strokeWidth: 1 });
 rect(342, 249, 566, 30, { backgroundColor: "#ffffff", strokeColor: "#b7bec6", strokeWidth: 1 });
-text(512, 255, "wonderdrive.app/new", 12, { strokeColor: "#667085" });
+text(512, 255, "curiositypedia.app/new", 12, { strokeColor: "#667085" });
 
 rect(1260, 235, 1090, 58, { backgroundColor: "#27313a", strokeColor: "#27313a", strokeWidth: 2 });
 ellipse(1285, 256, 12, 12, { backgroundColor: "#ff7b67", strokeWidth: 1 });
 ellipse(1308, 256, 12, 12, { backgroundColor: "#ffd166", strokeWidth: 1 });
 ellipse(1331, 256, 12, 12, { backgroundColor: "#81d88d", strokeWidth: 1 });
 rect(1522, 249, 566, 30, { backgroundColor: "#16212a", strokeColor: "#5e6a74", strokeWidth: 1 });
-text(1693, 255, "wonderdrive.app/research", 12, { strokeColor: "#b8c2ca" });
+text(1693, 255, "curiositypedia.app/research", 12, { strokeColor: "#b8c2ca" });
 
 // Screen 1 navigation.
-text(115, 321, "WONDERDRIVE", 18);
+text(115, 321, "CURIOSITYPEDIA", 18);
 text(575, 323, "New journey", 13);
 text(688, 323, "My paths", 13, { strokeColor: "#667085" });
 ellipse(1110, 320, 14, 14, { backgroundColor: "#81d88d", strokeColor: "#2f7d3a", strokeWidth: 1 });

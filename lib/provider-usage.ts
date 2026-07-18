@@ -2,14 +2,13 @@ import { getD1 } from "../db";
 import { MODELS } from "./catalog";
 import type { ModelId } from "./contracts";
 import { isRecord } from "./openai";
+import {
+  markProviderCostUncertain,
+  settleProviderCost,
+} from "./provider-cost-control";
+import type { ProviderCostOperation } from "./provider-cost-control";
 
-export type ProviderOperation =
-  | "live_research"
-  | "image_note_repair"
-  | "citation_repair"
-  | "citation_recovery"
-  | "starter_generation"
-  | "question_redraw";
+export type ProviderOperation = ProviderCostOperation;
 
 export type ProviderOutcome =
   | "completed"
@@ -43,6 +42,7 @@ type ProviderUsageContext = {
 };
 
 type RecordProviderUsageInput = ProviderUsageContext & {
+  costReservationId?: string;
   outcome: ProviderOutcome;
   response?: unknown;
   providerRequestId?: string | null;
@@ -89,6 +89,22 @@ export function summarizeOpenAIUsage(response: unknown, modelId: ModelId): OpenA
 
 export async function recordOpenAIUsage(input: RecordProviderUsageInput): Promise<OpenAIUsageSummary> {
   const usage = summarizeOpenAIUsage(input.response, input.modelId);
+  if (input.costReservationId) {
+    try {
+      if (hasUsagePayload(input.response)) {
+        await settleProviderCost(
+          input.costReservationId,
+          Math.round(usage.estimatedCostUsd * 1_000_000),
+          input.providerRequestId ?? usage.providerResponseId,
+        );
+      } else {
+        await markProviderCostUncertain(input.costReservationId, input.providerRequestId);
+      }
+    } catch (error) {
+      // The full reservation remains authoritative if settlement cannot be persisted.
+      console.error("CuriosityPedia provider cost settlement failed", error);
+    }
+  }
   let db: D1Database;
   try {
     db = getD1();
@@ -145,9 +161,13 @@ export async function recordOpenAIUsage(input: RecordProviderUsageInput): Promis
       .run();
   } catch (error) {
     // Provider work must not be discarded because analytics persistence failed.
-    console.error("WonderDrive provider usage analytics write failed", error);
+    console.error("CuriosityPedia provider usage analytics write failed", error);
   }
   return usage;
+}
+
+function hasUsagePayload(response: unknown) {
+  return isRecord(response) && isRecord(response.usage);
 }
 
 function countWebSearchCalls(output: unknown): number {

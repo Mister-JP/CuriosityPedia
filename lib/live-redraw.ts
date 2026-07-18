@@ -1,5 +1,5 @@
 import { PROMPT_VERSION, performerById } from "./catalog";
-import type { JourneyTurn, ModelId, PerformerId } from "./contracts";
+import type { JourneyTurn, ModelId, PerformerId, Viewer } from "./contracts";
 import { RepositoryError } from "./errors";
 import {
   isRecord,
@@ -10,6 +10,7 @@ import {
   structuredOutput,
 } from "./openai";
 import { recordOpenAIUsage } from "./provider-usage";
+import { reserveProviderCost } from "./provider-cost-control";
 import { localeName } from "./i18n";
 
 type RedrawResult = {
@@ -42,6 +43,8 @@ const REDRAW_SCHEMA = {
 
 export async function runLiveRedraw(input: {
   identityId: string;
+  viewerMode: Viewer["mode"];
+  callKey: string;
   journeyId: string;
   turn: JourneyTurn;
   performerId: PerformerId;
@@ -53,22 +56,37 @@ export async function runLiveRedraw(input: {
   const performer = performerById(input.performerId);
   const startedAt = Date.now();
   let response: Response;
+  let costReservationId: string | undefined;
+  const requestBody = {
+    model: input.modelId,
+    instructions: buildRedrawInstructions(input, performer),
+    input: JSON.stringify(buildRedrawInput(input)),
+    max_output_tokens: OPENAI_PROMPT_LIMITS.questionRedraw.maxOutputTokens,
+    reasoning: { effort: OPENAI_PROMPT_LIMITS.questionRedraw.reasoning },
+    text: structuredOutput("curiositypedia_redraw", REDRAW_SCHEMA),
+    safety_identifier: "wd_question_redraw",
+    store: false,
+  };
   try {
-    response = await requestOpenAI({
-      model: input.modelId,
-      instructions: buildRedrawInstructions(input, performer),
-      input: JSON.stringify(buildRedrawInput(input)),
-      max_output_tokens: OPENAI_PROMPT_LIMITS.questionRedraw.maxOutputTokens,
-      reasoning: { effort: OPENAI_PROMPT_LIMITS.questionRedraw.reasoning },
-      text: structuredOutput("wonderdrive_redraw", REDRAW_SCHEMA),
-      safety_identifier: "wd_question_redraw",
-      store: false,
-    }, {
+    const reservation = await reserveProviderCost({
+      callKey: `redraw:${input.identityId}:${input.callKey}`,
+      identityId: input.identityId,
+      viewerMode: input.viewerMode,
+      modelId: input.modelId,
+      operation: "question_redraw",
+      requestBody,
+      journeyId: input.journeyId,
+      turnId: input.turn.id,
+      unavailableMessage: "Live question redrawing is not configured on this deployment.",
+    });
+    costReservationId = reservation.id;
+    response = await requestOpenAI(requestBody, {
       unavailableMessage: "Live question redrawing is not configured on this deployment.",
     });
   } catch (error) {
-    await recordOpenAIUsage({
+    if (costReservationId) await recordOpenAIUsage({
       identityId: input.identityId,
+      costReservationId,
       journeyId: input.journeyId,
       turnId: input.turn.id,
       modelId: input.modelId,
@@ -85,6 +103,7 @@ export async function runLiveRedraw(input: {
   if (!response.ok) {
     await recordOpenAIUsage({
       identityId: input.identityId,
+      costReservationId,
       journeyId: input.journeyId,
       turnId: input.turn.id,
       modelId: input.modelId,
@@ -102,7 +121,7 @@ export async function runLiveRedraw(input: {
       "PROVIDER_ERROR",
       response.status === 429
         ? "Question redrawing is busy. Please try again shortly."
-        : "WonderDrive could not redraw the questions right now.",
+        : "CuriosityPedia could not redraw the questions right now.",
       response.status === 429 ? 429 : 502,
       true,
     );
@@ -113,6 +132,7 @@ export async function runLiveRedraw(input: {
   } catch (error) {
     await recordOpenAIUsage({
       identityId: input.identityId,
+      costReservationId,
       journeyId: input.journeyId,
       turnId: input.turn.id,
       modelId: input.modelId,
@@ -132,6 +152,7 @@ export async function runLiveRedraw(input: {
   if (incompleteReason) {
     await recordOpenAIUsage({
       identityId: input.identityId,
+      costReservationId,
       journeyId: input.journeyId,
       turnId: input.turn.id,
       modelId: input.modelId,
@@ -159,11 +180,11 @@ export async function runLiveRedraw(input: {
   try {
     parsed = JSON.parse(outputText(payload));
   } catch {
-    await recordRedrawValidationFailure(input, response, payload, startedAt);
+    await recordRedrawValidationFailure(input, response, payload, startedAt, costReservationId);
     throw invalidRedraw();
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.options) || parsed.options.length !== 2) {
-    await recordRedrawValidationFailure(input, response, payload, startedAt);
+    await recordRedrawValidationFailure(input, response, payload, startedAt, costReservationId);
     throw invalidRedraw();
   }
   let options: Array<{ question: string; angle: string }>;
@@ -177,11 +198,11 @@ export async function runLiveRedraw(input: {
     });
     if (tooSimilar(options[0].question, options[1].question)) throw invalidRedraw();
   } catch (error) {
-    await recordRedrawValidationFailure(input, response, payload, startedAt);
+    await recordRedrawValidationFailure(input, response, payload, startedAt, costReservationId);
     throw error;
   }
   if (options.some((option) => input.rejectedQuestions.some((rejected) => tooSimilar(option.question, rejected)))) {
-    await recordRedrawValidationFailure(input, response, payload, startedAt, "REPEATED_REJECTED_PATH");
+    await recordRedrawValidationFailure(input, response, payload, startedAt, costReservationId, "REPEATED_REJECTED_PATH");
     throw new RepositoryError(
       "RESEARCH_VALIDATION_FAILED",
       "The redraw repeated a path you already rejected. Nothing changed; please retry.",
@@ -191,6 +212,7 @@ export async function runLiveRedraw(input: {
   }
   await recordOpenAIUsage({
     identityId: input.identityId,
+    costReservationId,
     journeyId: input.journeyId,
     turnId: input.turn.id,
     modelId: input.modelId,
@@ -214,7 +236,7 @@ function buildRedrawInstructions(
   performer: ReturnType<typeof performerById>,
 ) {
   return [
-    `WonderDrive prompt ${PROMPT_VERSION}. Generate only the next two curiosity paths.`,
+    `CuriosityPedia prompt ${PROMPT_VERSION}. Generate only the next two curiosity paths.`,
     "The learner has just read the supplied visible text and may also have seen the supplied factual image.",
     `Use the loose ${performer.name} cue as an editorial selection lens (${performer.cue}), not as character roleplay.`,
     `Question posture: ${performer.questionPosture}`,
@@ -256,10 +278,12 @@ async function recordRedrawValidationFailure(
   response: Response,
   payload: unknown,
   startedAt: number,
+  costReservationId: string | undefined,
   errorCode = "SCHEMA_INVALID",
 ) {
   await recordOpenAIUsage({
     identityId: input.identityId,
+    costReservationId,
     journeyId: input.journeyId,
     turnId: input.turn.id,
     modelId: input.modelId,
@@ -271,7 +295,7 @@ async function recordRedrawValidationFailure(
     httpStatus: response.status,
     latencyMs: Date.now() - startedAt,
     errorCode,
-    errorMessage: "Question redraw did not pass WonderDrive validation.",
+    errorMessage: "Question redraw did not pass CuriosityPedia validation.",
     metadata: { adventure: input.adventure, hasLearnerNote: Boolean(input.reason) },
   });
 }
@@ -300,7 +324,7 @@ function normalize(value: string) {
 function invalidRedraw() {
   return new RepositoryError(
     "SCHEMA_INVALID",
-    "The replacement questions did not pass WonderDrive’s relevance checks. Nothing changed; please retry.",
+    "The replacement questions did not pass CuriosityPedia’s relevance checks. Nothing changed; please retry.",
     502,
     true,
   );

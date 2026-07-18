@@ -9,7 +9,7 @@ function text(x,y,value,size=16,o={}){const ls=value.split("\n");elements.push({
 function path(type,x,y,points,o={}){const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);elements.push({...b(type,x,y,Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys),{...o,roundness:false}),points,lastCommittedPoint:null,startBinding:null,endBinding:null,startArrowhead:null,endArrowhead:type==="arrow"?"arrow":null,elbowed:false})}
 const line=(x,y,p,o={})=>path("line",x,y,p,o), arrow=(x,y,p,o={})=>path("arrow",x,y,p,o);
 
-text(70,38,"WonderDrive — one answer screen, two states",36);
+text(70,38,"CuriosityPedia — one answer screen, two states",36);
 text(72,88,"Loading happens inside the information layout; the page never swaps to a separate research screen.",17,{strokeColor:"#667085"});
 rect(1915,42,420,52,{backgroundColor:"#dfff58"}); text(1972,57,"PERSISTENT SHELL · PROGRESSIVE REVEAL",13);
 
@@ -20,8 +20,8 @@ function shell(x,label,state){
   rect(x,228,1110,1150,{backgroundColor:"#fffdf8",strokeWidth:3,roughness:1.6});
   rect(x,228,1110,57,{backgroundColor:"#eeeae2",strokeWidth:2});
   ellipse(x+25,249,12,12,{backgroundColor:"#ff7b67",strokeWidth:1}); ellipse(x+48,249,12,12,{backgroundColor:"#ffd166",strokeWidth:1}); ellipse(x+71,249,12,12,{backgroundColor:"#81d88d",strokeWidth:1});
-  rect(x+290,242,530,29,{backgroundColor:"#ffffff",strokeColor:"#b7bec6",strokeWidth:1}); text(x+448,248,"wonderdrive.app/journey/7",11,{strokeColor:"#667085"});
-  text(x+32,307,"WONDERDRIVE",16); text(x+495,309,"Journey",12); text(x+575,309,"Map",12,{strokeColor:"#667085"}); text(x+1022,309,"•••",14);
+  rect(x+290,242,530,29,{backgroundColor:"#ffffff",strokeColor:"#b7bec6",strokeWidth:1}); text(x+448,248,"curiositypedia.app/journey/7",11,{strokeColor:"#667085"});
+  text(x+32,307,"CURIOSITYPEDIA",16); text(x+495,309,"Journey",12); text(x+575,309,"Map",12,{strokeColor:"#667085"}); text(x+1022,309,"•••",14);
   line(x+25,343,[[0,0],[1060,0]],{strokeColor:"#c9cfd5",strokeWidth:1});
   text(x+42,375,"TURN 01 · SAGE",10,{strokeColor:"#d64b38"});
   text(x+42,403,"Where does a city",31); text(x+42,442,"keep its memories?",31);
@@ -84,7 +84,7 @@ line(70,1418,[[0,0],[2290,0]],{strokeColor:"#b7bec6",strokeWidth:1});
 rect(70,1450,2290,130,{backgroundColor:"#e6f4ff",strokeColor:"#3182ce",roughness:1.5}); text(100,1476,"UNIFIED BEHAVIOR",12,{strokeColor:"#1971c2"}); text(100,1507,"The question header, answer column, and direction rail mount once. During research, the answer column shows observable activity and content-shaped",15); text(100,1535,"placeholders while paths remain visibly disabled. When validation succeeds, information and choices replace those regions without a page change.",15);
 
 const drawing={type:"excalidraw",version:2,source:"https://excalidraw.com",elements,appState:{gridSize:null,viewBackgroundColor:"#f7f5ef",currentItemFontFamily:5},files:{}};
-fs.mkdirSync("design",{recursive:true}); const stem="design/wonderdrive-unified-information-loading";
+fs.mkdirSync("design",{recursive:true}); const stem="design/curiositypedia-unified-information-loading";
 fs.writeFileSync(`${stem}.excalidraw`,`${JSON.stringify(drawing,null,2)}\n`);
 const esc=s=>s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
 const out=[`<svg xmlns="http://www.w3.org/2000/svg" width="2430" height="1630" viewBox="0 0 2430 1630"><rect width="2430" height="1630" fill="#f7f5ef"/><style>text{font-family:Arial,Helvetica,sans-serif}</style><defs><filter id="w"><feTurbulence baseFrequency=".012" numOctaves="1" seed="8" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale=".7"/></filter></defs>`];

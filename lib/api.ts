@@ -68,6 +68,6 @@ export function assertMutationOrigin(request: Request) {
     throw new RepositoryError("FORBIDDEN", "The request origin was invalid.", 403);
   }
   if (originUrl.host !== requestUrl.host || originUrl.protocol !== requestUrl.protocol) {
-    throw new RepositoryError("FORBIDDEN", "The request origin did not match WonderDrive.", 403);
+    throw new RepositoryError("FORBIDDEN", "The request origin did not match CuriosityPedia.", 403);
   }
 }

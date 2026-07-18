@@ -30,6 +30,7 @@ export class ApiRequestError extends Error {
     message: string,
     public readonly code: ApiFailure["error"]["code"],
     public readonly retryable: boolean,
+    public readonly diagnosticId?: string,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -50,7 +51,12 @@ export async function api<T>(url: string, init?: RequestInit): Promise<ApiSucces
   const payload = (await response.json()) as ApiSuccess<T> | ApiFailure;
   if (!response.ok || "error" in payload) {
     if ("error" in payload) {
-      throw new ApiRequestError(payload.error.message, payload.error.code, payload.error.retryable);
+      throw new ApiRequestError(
+        payload.error.message,
+        payload.error.code,
+        payload.error.retryable,
+        payload.error.diagnosticId,
+      );
     }
     throw new Error("The request failed.");
   }
@@ -74,6 +80,7 @@ export async function streamLiveResearch(
       payload.error?.message ?? "Live research could not start.",
       payload.error?.code ?? "INTERNAL_ERROR",
       payload.error?.retryable ?? true,
+      payload.error?.diagnosticId,
     );
   }
   if (!response.body) throw new Error("Live research did not return a readable stream.");
@@ -126,7 +133,12 @@ export async function streamLiveResearch(
             diagnosticId: event.error.diagnosticId ?? current.diagnosticId,
             errorCode: event.error.code,
           });
-          throw new ApiRequestError(event.error.message, event.error.code, event.error.retryable);
+          throw new ApiRequestError(
+            event.error.message,
+            event.error.code,
+            event.error.retryable,
+            event.error.diagnosticId,
+          );
         } else if (event.type === "complete") {
           complete = event;
         }
@@ -141,9 +153,13 @@ export async function streamLiveResearch(
 }
 
 export function messageFrom(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "WonderDrive could not complete that request.";
+  return cause instanceof Error ? cause.message : "CuriosityPedia could not complete that request.";
 }
 
 export function errorCodeFrom(cause: unknown): ApiFailure["error"]["code"] | null {
   return cause instanceof ApiRequestError ? cause.code : null;
+}
+
+export function diagnosticIdFrom(cause: unknown): string | null {
+  return cause instanceof ApiRequestError ? cause.diagnosticId ?? null : null;
 }

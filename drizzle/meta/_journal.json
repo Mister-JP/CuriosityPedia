@@ -71,6 +71,20 @@
       "when": 1784210625743,
       "tag": "0009_watery_annihilus",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784397731946,
+      "tag": "0010_condemned_red_ghost",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1784400357297,
+      "tag": "0011_bent_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

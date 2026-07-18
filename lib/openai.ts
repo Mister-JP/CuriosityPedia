@@ -6,6 +6,7 @@ declare global {
   namespace Cloudflare {
     interface Env {
       OPENAI_API_KEY?: string;
+      CURIOSITYPEDIA_OPENAI_ENABLED?: string;
     }
   }
 }
@@ -26,7 +27,31 @@ export const OPENAI_PROMPT_LIMITS = {
 } as const;
 
 export function openAIConfigured(): boolean {
-  return Boolean(env.OPENAI_API_KEY?.trim());
+  return openAIEnabled() && Boolean(env.OPENAI_API_KEY?.trim());
+}
+
+export function openAIEnabled(): boolean {
+  const configured = env.CURIOSITYPEDIA_OPENAI_ENABLED?.trim().toLowerCase();
+  return configured !== "0" && configured !== "false" && configured !== "off" && configured !== "disabled";
+}
+
+export function assertOpenAIAvailable(unavailableMessage?: string) {
+  if (!openAIEnabled()) {
+    throw new RepositoryError(
+      "PROVIDER_UNAVAILABLE",
+      "OpenAI-backed generation is temporarily disabled on this deployment.",
+      503,
+      true,
+    );
+  }
+  if (!env.OPENAI_API_KEY?.trim()) {
+    throw new RepositoryError(
+      "PROVIDER_UNAVAILABLE",
+      unavailableMessage ?? "OpenAI is not configured on this deployment.",
+      503,
+      true,
+    );
+  }
 }
 
 /** The single server-only transport for every OpenAI Responses request. */
@@ -34,15 +59,9 @@ export function requestOpenAI(
   body: object,
   options: { signal?: AbortSignal; unavailableMessage?: string } = {},
 ): Promise<Response> {
+  assertOpenAIAvailable(options.unavailableMessage);
   const apiKey = env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    throw new RepositoryError(
-      "PROVIDER_UNAVAILABLE",
-      options.unavailableMessage ?? "OpenAI is not configured on this deployment.",
-      503,
-      true,
-    );
-  }
+  if (!apiKey) throw new Error("OpenAI availability changed during request preparation.");
   return fetch(RESPONSES_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },

@@ -1,8 +1,8 @@
 import { query } from "../../../lib/api";
 import { PERFORMERS } from "../../../lib/catalog";
 import type { PerformerId } from "../../../lib/contracts";
+import { getPreferences } from "../../../lib/preferences-repository";
 import { getPersonalizedStarters } from "../../../lib/starter-recommendations";
-import { getPreferences } from "../../../lib/product-repository";
 
 export const dynamic = "force-dynamic";
 

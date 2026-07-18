@@ -6,8 +6,16 @@ import { hasTranslation, interfaceMessageKeys, translate } from "../app/i18n.tsx
 import { SUPPORTED_LOCALES, localeDirection, normalizeLocale, usesCompactWordSegmentation } from "../lib/i18n.ts";
 
 test("every interface message has a complete locale catalog with matching placeholders", async () => {
-  const source = await readFile(new URL("../app/wonderdrive-experience.tsx", import.meta.url), "utf8");
-  const keys = [...source.matchAll(/\bt\(\s*"([^"]+)"/g)].map((match) => match[1]);
+  const interfaceSources = await Promise.all([
+    "../app/curiositypedia-experience.tsx",
+    "../app/experience/bookmarks-view.tsx",
+    "../app/experience/empty-stage.tsx",
+    "../app/experience/journey-map.tsx",
+    "../app/experience/library-view.tsx",
+    "../app/experience/settings-view.tsx",
+    "../app/experience/usage-view.tsx",
+  ].map((path) => readFile(new URL(path, import.meta.url), "utf8")));
+  const keys = interfaceSources.flatMap((source) => [...source.matchAll(/\bt\(\s*"([^"]+)"/g)].map((match) => match[1]));
   const catalogKeys = [
     ...PERFORMERS.flatMap((performer) => [performer.role, performer.cue, ...performer.voiceTraits]),
     ...MODELS.map((model) => model.disclosure),

@@ -16,7 +16,7 @@ const C = {
 };
 
 const elements = [];
-const mapFileId = "wonderdrive-card-map";
+const mapFileId = "curiositypedia-card-map";
 let serial = 0;
 
 function base(type, x, y, width, height, o = {}) {
@@ -107,8 +107,7 @@ function skeleton(x, y, width, height = 11, light = false) {
 
 function header(x, y, loading = false) {
   rect(x, y, 1600, 66, { backgroundColor: C.surface, strokeColor: C.surface });
-  text(x + 44, y + 23, "WONDER", 17);
-  text(x + 118, y + 23, "DRIVE", 17, { strokeColor: C.coral });
+  text(x + 44, y + 23, "CuriosityPedia", 17);
   line(x + 214, y + 16, [[0, 0], [0, 34]], { strokeColor: C.divider });
   text(x + 240, y + 18, "TURN 06", 10, { strokeColor: C.muted });
   ellipse(x + 318, y + 15, 34, 34, { backgroundColor: "#ffd2ca", strokeColor: C.coral });
@@ -260,7 +259,7 @@ function overlayScreen(x, y) {
   text(modalX + 821, modalY + 620, "Close and continue", 10, { strokeColor: C.muted });
 }
 
-text(60, 34, "WonderDrive · contained answer card", 26);
+text(60, 34, "CuriosityPedia · contained answer card", 26);
 text(60, 69, "The main journey stays quiet; detail appears only on request in a closable overlay.", 13, { strokeColor: C.muted });
 rect(1360, 39, 300, 30, { backgroundColor: C.green, strokeColor: C.green });
 text(1395, 47, "CONDENSED · CARD-CONTAINED", 10);
@@ -301,7 +300,7 @@ const drawing = {
 };
 
 fs.mkdirSync("design", { recursive: true });
-const stem = "design/wonderdrive-card-journey-screen";
+const stem = "design/curiositypedia-card-journey-screen";
 fs.writeFileSync(`${stem}.excalidraw`, `${JSON.stringify(drawing, null, 2)}\n`);
 
 const esc = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");

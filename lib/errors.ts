@@ -9,6 +9,7 @@ export class RepositoryError extends Error {
     message: string,
     public readonly status: number,
     public readonly retryable = false,
+    public readonly diagnosticId?: string,
   ) {
     super(message);
     this.name = "RepositoryError";
@@ -17,11 +18,16 @@ export class RepositoryError extends Error {
 
 export function publicError(
   error: unknown,
-  fallback = "WonderDrive could not complete that request.",
+  fallback = "CuriosityPedia could not complete that request.",
 ): ApiFailure["error"] {
   if (error instanceof RepositoryError) {
-    return { code: error.code, message: error.message, retryable: error.retryable };
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      ...(error.diagnosticId ? { diagnosticId: error.diagnosticId } : {}),
+    };
   }
-  console.error("Unexpected WonderDrive error", error);
+  console.error("Unexpected CuriosityPedia error", error);
   return { code: "INTERNAL_ERROR", message: fallback, retryable: true };
 }

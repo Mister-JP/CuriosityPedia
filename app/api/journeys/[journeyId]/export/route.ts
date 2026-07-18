@@ -1,5 +1,5 @@
 import { failure } from "../../../../../lib/api";
-import { exportJourney } from "../../../../../lib/product-repository";
+import { exportJourney } from "../../../../../lib/snapshots-repository";
 import { resolveViewer } from "../../../../../lib/viewer";
 
 type Context = { params: Promise<{ journeyId: string }> };
@@ -12,7 +12,7 @@ export async function GET(_request: Request, context: Context) {
     return new Response(JSON.stringify(payload, null, 2), {
       headers: {
         "cache-control": "private, no-store",
-        "content-disposition": `attachment; filename="wonderdrive-${journeyId}.json"`,
+        "content-disposition": `attachment; filename="curiositypedia-${journeyId}.json"`,
         "content-type": "application/json; charset=utf-8",
         "x-content-type-options": "nosniff",
       },
