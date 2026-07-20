@@ -36,6 +36,7 @@ function journeyRow(changes = {}) {
     created_at: 700,
     updated_at: 900,
     open_branch_count: 2,
+    lead_answer_json: JSON.stringify({ blocks: [], media: [{ imageUrl: "https://images.example/firefly.jpg", sourcePageUrl: "https://example.org/fireflies", caption: "A firefly", alt: "A glowing firefly" }] }),
     ...changes,
   };
 }
@@ -126,16 +127,17 @@ test("listJourneys preserves ownership, creation time, soft-delete filtering, or
           pinned: 0,
           hidden: 1,
           updated_at: 800,
+          lead_answer_json: null,
         }),
       ];
     }
-    if (method === "all" && sql.includes("SELECT journey_id, parent_turn_id, topic_label, answer_json FROM turns")) {
+    if (method === "all" && sql.includes("SELECT journey_id, topic_label FROM turns")) {
       return [
-        { journey_id: "journey-alpha", parent_turn_id: null, topic_label: "Bioluminescence", answer_json: JSON.stringify({ blocks: [], media: [{ imageUrl: "https://images.example/firefly.jpg", sourcePageUrl: "https://example.org/fireflies", caption: "A firefly", alt: "A glowing firefly" }] }) },
-        { journey_id: "journey-alpha", parent_turn_id: "turn-root", topic_label: "Bioluminescence", answer_json: null },
-        { journey_id: "journey-alpha", parent_turn_id: "turn-root", topic_label: "Evolution", answer_json: null },
-        { journey_id: "journey-beta", parent_turn_id: null, topic_label: "", answer_json: null },
-        { journey_id: "journey-beta", parent_turn_id: "turn-beta", topic_label: "Oceanography", answer_json: null },
+        { journey_id: "journey-alpha", topic_label: "Bioluminescence" },
+        { journey_id: "journey-alpha", topic_label: "Bioluminescence" },
+        { journey_id: "journey-alpha", topic_label: "Evolution" },
+        { journey_id: "journey-beta", topic_label: "" },
+        { journey_id: "journey-beta", topic_label: "Oceanography" },
       ];
     }
     throw new Error(`Unexpected ${method} query: ${sql}`);
@@ -162,6 +164,7 @@ test("listJourneys preserves ownership, creation time, soft-delete filtering, or
   ]);
   assert.match(normalizedSql(db.calls[0]), /owner_identity_id = \? AND deleted_at IS NULL ORDER BY updated_at DESC/);
   assert.match(normalizedSql(db.calls[0]), /version, created_at, updated_at/);
+  assert.match(normalizedSql(db.calls[0]), /AS lead_answer_json/);
   assert.deepEqual(db.calls[0].bindings, [viewer.identityId]);
   assert.match(normalizedSql(db.calls[1]), /status = 'ready' ORDER BY created_at/);
   assert.deepEqual(db.calls[1].bindings, ["journey-alpha", "journey-beta"]);

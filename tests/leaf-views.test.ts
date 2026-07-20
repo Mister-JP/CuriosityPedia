@@ -3,7 +3,7 @@ import { register } from "node:module";
 import test from "node:test";
 
 import { BOOTSTRAP_CATALOG, DEFAULT_PREFERENCES } from "../lib/catalog";
-import type { Bookmark, JourneySummary, KnowledgeJourneySeed, ResearchActivity, TextSize, UsageSummary, UserPreferences, Viewer } from "../lib/contracts";
+import type { Bookmark, JourneySummary, KnowledgeJourneySeed, ResearchActivity, TextSize, TurnMedia, UsageSummary, UserPreferences, Viewer } from "../lib/contracts";
 import { buttonByText, elements, find, HookHarness, text, type TestElement } from "./leaf-view-harness";
 
 register(new URL("./journey-map-loader.mjs", import.meta.url));
@@ -371,7 +371,19 @@ test("UsageView preserves quota, journey capacity, spend, identity, and journeys
 
 test("JourneysView prioritizes the first question, creation time, and simple filtering", () => {
   const journeys = [
-    journeySummary("alpha", { seed: "Why do fireflies glow?", title: "Alpha trail", createdAt: Date.UTC(2024, 0, 2, 15, 4), updatedAt: Date.UTC(2030, 0, 2), }),
+    journeySummary("alpha", {
+      seed: "Why do fireflies glow?",
+      title: "Alpha trail",
+      createdAt: Date.UTC(2024, 0, 2, 15, 4),
+      updatedAt: Date.UTC(2030, 0, 2),
+      leadMedia: {
+        imageUrl: "https://images.example/firefly.jpg",
+        thumbnailUrl: "https://images.example/firefly-thumb.jpg",
+        sourcePageUrl: "https://example.org/fireflies",
+        caption: "A glowing firefly",
+        alt: "Firefly glowing at night",
+      },
+    }),
     journeySummary("beta", { seed: "How do whales navigate?", title: "Beta trail", performerId: "sage", pinned: true, updatedAt: 100 }),
     journeySummary("hidden", { title: "Hidden trail", hidden: true, updatedAt: 300 }),
   ];
@@ -383,6 +395,10 @@ test("JourneysView prioritizes the first question, creation time, and simple fil
   assert.match(text(rendered.root), /2024/);
   assert.doesNotMatch(text(rendered.root), /2030/);
   assert.doesNotMatch(text(rendered.root), /Turns|Sources|Open|unclassified journey/);
+  const leadVisual = find(rendered.root, (element) => (element.props.media as TurnMedia | undefined)?.imageUrl === "https://images.example/firefly.jpg");
+  const leadMedia = leadVisual.props.media as TurnMedia;
+  assert.equal(leadMedia.thumbnailUrl, "https://images.example/firefly-thumb.jpg");
+  assert.equal(leadMedia.alt, "Firefly glowing at night");
 
   const search = find(rendered.root, (element) => element.type === "input" && element.props.placeholder === "First question or journey label");
   (search.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "Alpha" } });
